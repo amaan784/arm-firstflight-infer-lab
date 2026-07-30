@@ -1,0 +1,80 @@
+# Model registry for Arm FirstFlight Infer Lab.
+#
+# Each model lists GGUF quant variants by name. The smoke model is tiny and downloads
+# in seconds so the pipeline can be proven end-to-end on ANY machine. Larger models are
+# for the real Arm benchmarks (CI uses the smoke model; a remote Arm VM can use bigger).
+#
+# `url` is a direct HTTPS download (Hugging Face "resolve" link). `sha256` is optional
+# but recommended for integrity once you have run the download once.
+#
+# The smoke URLs below were verified live (2026-06-26): the official Qwen GGUF repo uses
+# ALL-LOWERCASE filenames (q4_k_m, q8_0, fp16) and the resolve URLs return real binaries.
+#
+# ---------------------------------------------------------------------------------------
+# KleidiAI NOTE (matters for Phase 4): Arm's KleidiAI int4/int8 microkernels in current
+# llama.cpp accelerate ONLY Q4_0 and Q8_0 weights (one-time repack at load) — NOT Q4_K_M
+# / k-quants. So the "KleidiAI on vs off" comparison must use a **Q4_0** model. bartowski
+# additionally ships Arm-packed quants (Q4_0_4_4 / Q4_0_4_8 / Q4_0_8_8). See METHODOLOGY.md.
+#   Verify KleidiAI is active by looking for this line in llama.cpp load output:
+#     load_tensors: CPU_KLEIDIAI model buffer size = ... MiB
+# ---------------------------------------------------------------------------------------
+
+default_smoke: qwen2.5-0.5b-instruct
+default_smoke_variant: q4_k_m
+
+models:
+  qwen2.5-0.5b-instruct:
+    hf_repo: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+    description: "Qwen2.5 0.5B Instruct — smoke / CI default (Apache-2.0). Has all three quant axes."
+    variants:
+      q4_0:
+        file: qwen2.5-0.5b-instruct-q4_0.gguf
+        url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf"  # verified 2026-07-07 (GGUF magic + 428MB)
+        sha256: ""
+      q4_k_m:
+        file: qwen2.5-0.5b-instruct-q4_k_m.gguf
+        url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"  # verified 2026-06-26
+        sha256: ""  # optional; fill after first download
+      q8_0:
+        file: qwen2.5-0.5b-instruct-q8_0.gguf
+        url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf"  # verified 2026-06-26
+        sha256: ""
+
+  # bartowski variant of the same 0.5B model — adds a Q4_0 quant (the KleidiAI-accelerated
+  # path) plus Arm-packed Q4_0_4_4 / Q4_0_4_8 / Q4_0_8_8 for the Phase 4 KleidiAI experiment.
+  qwen2.5-0.5b-instruct-bartowski:
+    hf_repo: bartowski/Qwen2.5-0.5B-Instruct-GGUF
+    description: "Qwen2.5 0.5B Instruct (bartowski) — provides the Q4_0 KleidiAI path."
+    variants:
+      q4_0:
+        file: Qwen2.5-0.5B-Instruct-Q4_0.gguf
+        url: "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_0.gguf"  # TODO(confirm) exact file present
+        sha256: ""
+      q4_k_m:
+        file: Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
+        url: "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"  # verified 2026-06-26
+        sha256: ""
+      q8_0:
+        file: Qwen2.5-0.5B-Instruct-Q8_0.gguf
+        url: "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q8_0.gguf"  # verified 2026-06-26
+        sha256: ""
+
+  # ---- Larger models for the real Arm benchmarks (fill URLs after confirming) ----
+  # Uncomment and verify before using on a remote Arm VM. These are the before/after
+  # quant-comparison + prefill-scaling targets in Phase 1/4.
+  #
+  # llama-3.2-1b-instruct:
+  #   hf_repo: bartowski/Llama-3.2-1B-Instruct-GGUF
+  #   description: "Llama 3.2 1B Instruct."
+  #   variants:
+  #     q4_0:   { file: Llama-3.2-1B-Instruct-Q4_0.gguf,   url: "" }   # TODO(confirm)
+  #     q4_k_m: { file: Llama-3.2-1B-Instruct-Q4_K_M.gguf, url: "" }   # TODO(confirm)
+  #     q8_0:   { file: Llama-3.2-1B-Instruct-Q8_0.gguf,   url: "" }   # TODO(confirm)
+  #
+  # qwen2.5-3b-instruct:
+  #   hf_repo: Qwen/Qwen2.5-3B-Instruct-GGUF
+  #   description: "Qwen2.5 3B Instruct — heavier prefill-scaling target."
+  #   variants:
+  #     q4_0:   { file: qwen2.5-3b-instruct-q4_0.gguf,   url: "" }     # TODO(confirm)
+  #     q4_k_m: { file: qwen2.5-3b-instruct-q4_k_m.gguf, url: "" }     # TODO(confirm)
+  #     q8_0:   { file: qwen2.5-3b-instruct-q8_0.gguf,   url: "" }     # TODO(confirm)

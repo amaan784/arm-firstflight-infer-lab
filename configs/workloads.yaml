@@ -1,0 +1,27 @@
+# Prefill / long-context workloads. The headline metric is TTFT / prefill latency, so we
+# sweep prompt (context) lengths and keep generation short. `llama-bench` consumes these as
+# -p (prompt tokens / prefill) and -n (generation tokens).
+
+default_workload: prefill-scaling
+
+workloads:
+  prefill-scaling:
+    description: "Prefill (prompt-processing) latency vs context length — the TTFT story."
+    prompt_lengths: [128, 512, 2048, 8192, 16384, 32768]
+    gen_lengths: [32]
+    repeats: 5          # timed repeats per point (variance)
+    warmup: 1           # warm-up runs discarded
+
+  quick-smoke:
+    description: "Tiny end-to-end sanity check (any machine)."
+    prompt_lengths: [64]
+    gen_lengths: [16]
+    repeats: 1
+    warmup: 0
+
+  rag-context:
+    description: "Representative RAG context sizes."
+    prompt_lengths: [2048, 4096, 8192]
+    gen_lengths: [64]
+    repeats: 3
+    warmup: 1

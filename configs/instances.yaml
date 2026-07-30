@@ -1,0 +1,46 @@
+# Instance cost table for the $/M-token calculation (see src/firstflight/cost.py).
+#
+# Prices below were verified against AWS's own on-demand pricing feed and Oracle's price-list
+# API on 2026-07-05 (Linux, us-east-1 for AWS; OCI list prices are globally uniform).
+# TODO(confirm): re-check for YOUR region/date before submission — prices drift.
+
+default_instance: aws-graviton4-c8g-2xlarge
+
+instances:
+  aws-graviton4-c8g-2xlarge:
+    arch: arm64
+    cpu: "Arm Neoverse-V2 (AWS Graviton4)"
+    vcpus: 8
+    usd_per_hour: 0.319    # on-demand Linux us-east-1, verified 2026-07-05 (AWS pricing feed)
+    notes: "Recommended target for the headline before/after run."
+
+  aws-graviton3-c7g-2xlarge:
+    arch: arm64
+    cpu: "Arm Neoverse-V1 (AWS Graviton3)"
+    vcpus: 8
+    usd_per_hour: 0.29     # on-demand Linux us-east-1, verified 2026-07-05
+    notes: "Cheaper Graviton3 alternative."
+
+  aws-graviton2-t4g-small:
+    arch: arm64
+    cpu: "Arm Neoverse-N1 (AWS Graviton2)"
+    vcpus: 2
+    usd_per_hour: 0.0168   # on-demand Linux us-east-1, verified 2026-07-05
+    notes: "Free trial: 750 hrs/month through 2026-12-31 (burstable; fine for smoke, not headline runs)."
+
+  oracle-ampere-a1-flex-2ocpu:
+    arch: arm64
+    cpu: "Ampere Altra (Arm Neoverse-N1)"
+    vcpus: 2   # OCPUs
+    usd_per_hour: 0.023    # 2 OCPU x $0.01 + 12 GB x $0.0015 ~= $0.038/hr list; $0 within Always Free
+    notes: >-
+      Oracle Always Free now covers 1,500 OCPU-hrs + 9,000 GB-hrs/month (~2 OCPUs/12GB 24/7,
+      per docs checked 2026-07-05 — the old 4 OCPU/24GB figure is stale). List price
+      $0.01/OCPU-hr + $0.0015/GB-hr. Set 0.0 here if you stay within the free allotment.
+
+  github-arm-runner:
+    arch: arm64
+    cpu: "GitHub-hosted Arm runner (ubuntu-24.04-arm)"
+    vcpus: 4
+    usd_per_hour: 0.0      # free minutes for public repositories
+    notes: "Used for free, reproducible CI benchmarks (arm-bench.yml)."

@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arm-firstflight-infer-lab"
+version = "0.1.0"
+description = "Reproducible benchmark + optimization harness for CPU LLM inference on Arm Neoverse, focused on prefill / time-to-first-token (TTFT)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Arm FirstFlight Infer Lab authors" }]
+keywords = ["arm", "neoverse", "llama.cpp", "kleidiai", "llm", "inference", "benchmark", "ttft", "prefill"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Benchmark",
+]
+
+# Core runtime deps are deliberately small + pure-Python so `firstflight smoke`
+# works on any machine after a quick `pip install`. Heavier deps (matplotlib,
+# lm-eval/torch, huggingface_hub) live in extras. Pins verified live 2026-06-26.
+dependencies = [
+    "click==8.4.2",
+    "rich==15.0.0",
+    "pyyaml==6.0.3",
+    "requests==2.34.2",
+    "tqdm==4.68.3",
+]
+
+[project.optional-dependencies]
+# Optional interactive charts.
+viz = ["plotly==6.8.0"]
+# Faster/auth'd model downloads (otherwise we stream the resolve URL via requests).
+hub = ["huggingface-hub==1.21.0"]
+# Lint + test.
+dev = ["ruff==0.15.20", "pytest==9.1.1"]
+# Convenience: everything except the heavy eval extra.
+all = [
+    "matplotlib==3.11.0",
+    "jinja2==3.1.6",
+    "plotly==6.8.0",
+    "huggingface-hub==1.21.0",
+    "ruff==0.15.20",
+    "pytest==9.1.1",
+]
+
+[project.scripts]
+firstflight = "firstflight.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/USER/arm-firstflight-infer-lab"   # TODO(confirm): set once the repo exists
+Issues = "https://github.com/USER/arm-firstflight-infer-lab/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/firstflight"]
+
+# Ship the default configs inside the wheel so a plain (non-editable) `pip install` works
+# outside a repo checkout — util.config_dir() falls back to these packaged copies.
+[tool.hatch.build.targets.wheel.force-include]
+"configs" = "firstflight/configs"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/firstflight", "configs", "README.md", "LICENSE"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

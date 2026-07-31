@@ -1,7 +1,7 @@
 """`firstflight` command-line entrypoint.
 
-Subcommands: setup-engine · info · smoke · download.
-`smoke` skips cleanly off Arm / without a llama.cpp build.
+Subcommands: setup-engine · info · smoke · download · run · bench · ttft · throughput.
+The bench commands skip cleanly off Arm / without a llama.cpp build.
 """
 
 from __future__ import annotations
@@ -97,6 +97,171 @@ def setup_engine(tag, dest, force) -> None:
     except fetch.EngineFetchError as exc:
         console.print(f"[red]setup-engine failed:[/] {safe(str(exc))}")
         sys.exit(1)
+
+
+_MODEL_OPTS = [
+    click.option(
+        "--model",
+        "model_id",
+        default=None,
+        help="Model id from models.yaml (default: smoke model).",
+    ),
+    click.option("--variant", default=None, help="Quant variant (default: model's default)."),
+    click.option(
+        "--threads", type=int, default=None, help="Thread count (default: llama-bench auto)."
+    ),
+    click.option("--no-download", is_flag=True, help="Require the model cached; don't download."),
+    click.option("--dry-run", is_flag=True, help="Print the llama-bench command and exit."),
+]
+
+
+def _model_opts(fn):
+    for opt in reversed(_MODEL_OPTS):
+        fn = opt(fn)
+    return fn
+
+
+@main.command()
+@click.option(
+    "--prompt-len", type=int, default=2048, show_default=True, help="Single prefill context length."
+)
+@click.option("--gen", "n_gen", type=int, default=32, show_default=True, help="Generation tokens.")
+@click.option("--label", default="run", show_default=True, help="Result label.")
+@_model_opts
+def run(prompt_len, n_gen, label, model_id, variant, threads, no_download, dry_run) -> None:
+    """Run a single (context-length, gen) point — quick iteration."""
+    from .runner import bench as run_bench
+
+    sys.exit(
+        run_bench(
+            model_id=model_id,
+            variant=variant,
+            workload="quick-smoke",
+            prompt_lengths=[prompt_len],
+            threads=threads,
+            n_gen=n_gen,
+            label=label,
+            download=not no_download,
+            dry_run=dry_run,
+        )
+    )
+
+
+@main.command()
+@click.option(
+    "--workload", default=None, help="Workload from workloads.yaml (default: its default)."
+)
+@click.option(
+    "--repetitions", type=int, default=None, help="Repeats per point (default: workload)."
+)
+@click.option(
+    "--gen", "n_gen", type=int, default=None, help="Generation tokens for the tg measurement."
+)
+@click.option(
+    "--label", default="baseline", show_default=True, help="Result label (for before/after)."
+)
+@_model_opts
+def bench(
+    workload, repetitions, n_gen, label, model_id, variant, threads, no_download, dry_run
+) -> None:
+    """Prefill/TTFT + generation throughput sweep across context lengths -> bench/results/*.json."""
+    from .runner import bench as run_bench
+
+    sys.exit(
+        run_bench(
+            model_id=model_id,
+            variant=variant,
+            workload=workload,
+            threads=threads,
+            repetitions=repetitions,
+            n_gen=n_gen,
+            label=label,
+            download=not no_download,
+            dry_run=dry_run,
+        )
+    )
+
+
+@main.command()
+@click.option(
+    "--prefix-tokens",
+    type=int,
+    default=2048,
+    show_default=True,
+    help="Approx. length of the shared prefix (the server reports exact counts).",
+)
+@click.option(
+    "--cache-reuse",
+    type=int,
+    default=256,
+    show_default=True,
+    help="llama-server --cache-reuse chunk size (KV-shift reuse; 0 disables).",
+)
+@click.option("--model", "model_id", default=None, help="Model id (default: smoke model).")
+@click.option("--variant", default=None, help="Quant variant (default: model's default).")
+@click.option("--threads", type=int, default=None, help="Thread count (default: auto).")
+@click.option("--port", type=int, default=8033, show_default=True, help="Local server port.")
+@click.option(
+    "--mlock",
+    is_flag=True,
+    help="Keep model resident in RAM (steady demo TTFT; needs memlock limit).",
+)
+@click.option("--no-download", is_flag=True, help="Require the model cached; don't download.")
+def ttft(prefix_tokens, cache_reuse, model_id, variant, threads, port, mlock, no_download) -> None:
+    """MEASURED TTFT + prompt-cache demo: llama-server timings, cold vs warm shared prefix."""
+    from .runner import ttft as run_ttft
+
+    sys.exit(
+        run_ttft(
+            model_id=model_id,
+            variant=variant,
+            prefix_tokens=prefix_tokens,
+            cache_reuse=cache_reuse,
+            threads=threads,
+            port=port,
+            mlock=mlock,
+            download=not no_download,
+        )
+    )
+
+
+@main.command()
+@click.option(
+    "--prompt-tokens",
+    "npp",
+    type=int,
+    default=2048,
+    show_default=True,
+    help="Prompt tokens per request.",
+)
+@click.option(
+    "--gen", "ntg", type=int, default=32, show_default=True, help="Generated tokens per request."
+)
+@click.option(
+    "--levels",
+    default="1,2,4,8",
+    show_default=True,
+    help="Comma-separated parallel-request levels.",
+)
+@click.option("--model", "model_id", default=None, help="Model id (default: smoke model).")
+@click.option("--variant", default=None, help="Quant variant (default: model's default).")
+@click.option("--threads", type=int, default=None, help="Thread count (default: auto).")
+@click.option("--no-download", is_flag=True, help="Require the model cached; don't download.")
+def throughput(npp, ntg, levels, model_id, variant, threads, no_download) -> None:
+    """Concurrency axis: aggregate tok/s at 1/2/4/8 parallel requests (llama-batched-bench)."""
+    from .runner import throughput as run_tp
+
+    sys.exit(
+        run_tp(
+            model_id=model_id,
+            variant=variant,
+            npp=npp,
+            ntg=ntg,
+            levels=[int(x) for x in levels.split(",") if x.strip()],
+            threads=threads,
+            download=not no_download,
+        )
+    )
 
 
 if __name__ == "__main__":

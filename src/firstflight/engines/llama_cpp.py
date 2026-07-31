@@ -26,8 +26,19 @@ from pathlib import Path
 CLI_NAMES = ["llama-cli", "main", "llama"]
 BENCH_NAMES = ["llama-bench"]
 SERVER_NAMES = ["llama-server"]
-KIND_NAMES = {"cli": CLI_NAMES, "bench": BENCH_NAMES, "server": SERVER_NAMES}
-PATH_NAMES = {"cli": ["llama-cli"], "bench": ["llama-bench"], "server": ["llama-server"]}
+BATCHED_NAMES = ["llama-batched-bench"]
+KIND_NAMES = {
+    "cli": CLI_NAMES,
+    "bench": BENCH_NAMES,
+    "server": SERVER_NAMES,
+    "batched": BATCHED_NAMES,
+}
+PATH_NAMES = {
+    "cli": ["llama-cli"],
+    "bench": ["llama-bench"],
+    "server": ["llama-server"],
+    "batched": ["llama-batched-bench"],
+}
 
 
 def _filenames(names: list[str]) -> list[str]:

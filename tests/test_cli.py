@@ -15,6 +15,39 @@ def test_info_runs():
     assert "version" in res.output.lower()
 
 
+def test_bench_dry_run_prints_command():
+    res = CliRunner().invoke(main, ["bench", "--dry-run"])
+    assert res.exit_code == 0
+    assert "llama-bench" in res.output
+    assert "-p" in res.output
+
+
+def test_bench_skips_without_binary(monkeypatch):
+    monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+    res = CliRunner().invoke(main, ["bench", "--no-download"])
+    assert res.exit_code == 0
+    assert "skip" in res.output.lower()
+
+
+def test_ttft_skips_without_server_binary(monkeypatch):
+    monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+    res = CliRunner().invoke(main, ["ttft", "--no-download"])
+    assert res.exit_code == 0
+    assert "skip" in res.output.lower()
+    assert "llama-server" in res.output
+
+
+def test_throughput_skips_without_binary(monkeypatch):
+    monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+    res = CliRunner().invoke(main, ["throughput", "--no-download"])
+    assert res.exit_code == 0
+    assert "skip" in res.output.lower()
+    assert "llama-batched-bench" in res.output
+
+
 def test_smoke_skips_without_binary(monkeypatch):
     # No binary on PATH and no LLAMA_CPP_BIN -> clean skip (exit 0), no download attempted.
     monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)

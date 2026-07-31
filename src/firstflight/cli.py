@@ -1,7 +1,7 @@
 """`firstflight` command-line entrypoint.
 
-Subcommands: setup-engine · info · smoke · download · run · bench · ttft · throughput.
-The bench commands skip cleanly off Arm / without a llama.cpp build.
+Subcommands: setup-engine · info · smoke · download · run · bench · ttft · throughput ·
+report. All skip cleanly off Arm / without a llama.cpp build.
 """
 
 from __future__ import annotations
@@ -260,6 +260,46 @@ def throughput(npp, ntg, levels, model_id, variant, threads, no_download) -> Non
             levels=[int(x) for x in levels.split(",") if x.strip()],
             threads=threads,
             download=not no_download,
+        )
+    )
+
+
+@main.command()
+@click.option(
+    "--results-dir",
+    "results_source",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Directory of result JSONs (default: bench/results).",
+)
+@click.option(
+    "--instance",
+    "instance_name",
+    default=None,
+    help="Instance for the $/M-token cost (default: instances.yaml default).",
+)
+@click.option(
+    "--out-dir",
+    "out_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output directory (default: bench/reports).",
+)
+@click.option(
+    "--demo",
+    is_flag=True,
+    help="Render a clearly-labeled synthetic DEMO report (no Arm box needed).",
+)
+def report(results_source, instance_name, out_dir, demo) -> None:
+    """Render the before/after markdown + standalone HTML report from bench/results/*.json."""
+    from .runner import report as run_report
+
+    sys.exit(
+        run_report(
+            results_source=results_source,
+            instance_name=instance_name,
+            out_dir=out_dir,
+            demo=demo,
         )
     )
 

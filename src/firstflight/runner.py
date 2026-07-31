@@ -381,3 +381,39 @@ def throughput(
     result.save_json(out)
     console.print(f"[green]OK[/] wrote {out}")
     return 0
+
+
+def report(
+    *,
+    results_source=None,
+    out_dir=None,
+    instance_name: str | None = None,
+    demo: bool = False,
+) -> int:
+    """Render the markdown + standalone HTML report. Returns a process exit code."""
+    from .report import render
+
+    console.rule("[bold]firstflight report[/]")
+    try:
+        paths = render.render_report(
+            results_source=results_source,
+            out_dir=out_dir,
+            instance_name=instance_name,
+            demo=demo,
+        )
+    except render.ReportError as exc:
+        console.print(f"[red]Report error:[/] {safe(str(exc))}")
+        return 1
+
+    if paths is None:
+        console.print(
+            "[yellow]No results found.[/] Run `firstflight bench` first, "
+            "or preview the layout with `firstflight report --demo`."
+        )
+        return 0
+
+    console.print("[green]OK[/] wrote report:")
+    console.print(f"  HTML:   {paths.html}")
+    console.print(f"  MD:     {paths.markdown}")
+    console.print(f"  charts: {len(paths.charts)} PNG(s)")
+    return 0

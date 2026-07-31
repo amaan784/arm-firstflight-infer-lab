@@ -48,6 +48,13 @@ def test_throughput_skips_without_binary(monkeypatch):
     assert "llama-batched-bench" in res.output
 
 
+def test_report_no_results_is_graceful(tmp_path):
+    # empty results dir -> friendly message, exit 0 (no matplotlib needed for this path)
+    res = CliRunner().invoke(main, ["report", "--results-dir", str(tmp_path)])
+    assert res.exit_code == 0
+    assert "no results" in res.output.lower()
+
+
 def test_smoke_skips_without_binary(monkeypatch):
     # No binary on PATH and no LLAMA_CPP_BIN -> clean skip (exit 0), no download attempted.
     monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)

@@ -9,7 +9,7 @@ FF     ?= $(PYTHON) -m firstflight
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup setup-engine smoke info download test lint format clean
+.PHONY: help setup setup-engine smoke info download bench test lint format clean
 
 help:  ## Show this help
 	@echo "Arm FirstFlight — targets:"
@@ -18,6 +18,7 @@ help:  ## Show this help
 	@echo "  smoke     Download tiny model + run llama.cpp once (skips cleanly off-Arm/no binary)"
 	@echo "  info      Print environment + config summary"
 	@echo "  download  Download the default smoke model only"
+	@echo "  bench     Run the prefill/TTFT benchmark sweep            (Phase 1)"
 	@echo "  test      Run unit tests (pytest)"
 	@echo "  lint      Lint with ruff"
 	@echo "  format    Auto-format with ruff"
@@ -37,6 +38,9 @@ info:  ## Environment + config summary
 
 download:  ## Download the default smoke model only
 	$(FF) download
+
+bench:  ## Prefill/TTFT benchmark sweep (Phase 1)
+	$(FF) bench
 
 test:  ## Unit tests
 	$(PYTHON) -m pytest

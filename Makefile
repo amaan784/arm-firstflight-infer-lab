@@ -9,23 +9,25 @@ FF     ?= $(PYTHON) -m firstflight
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup setup-engine smoke info download bench test lint format clean
+.PHONY: help setup setup-engine smoke info download bench report report-demo test lint format clean
 
 help:  ## Show this help
 	@echo "Arm FirstFlight — targets:"
-	@echo "  setup     Install the package (editable) with dev extras"
+	@echo "  setup     Install the package (editable) with report+dev extras"
 	@echo "  setup-engine  Download the prebuilt llama.cpp for THIS platform into ./engine"
 	@echo "  smoke     Download tiny model + run llama.cpp once (skips cleanly off-Arm/no binary)"
 	@echo "  info      Print environment + config summary"
 	@echo "  download  Download the default smoke model only"
 	@echo "  bench     Run the prefill/TTFT benchmark sweep            (Phase 1)"
+	@echo "  report    Render the before/after markdown + HTML report from bench/results"
+	@echo "  report-demo  Render a synthetic DEMO report (no Arm box needed)"
 	@echo "  test      Run unit tests (pytest)"
 	@echo "  lint      Lint with ruff"
 	@echo "  format    Auto-format with ruff"
 	@echo "  clean     Remove caches and local scratch"
 
-setup:  ## Editable install with dev extras
-	$(PYTHON) -m pip install -e ".[dev]"
+setup:  ## Editable install with report + dev extras
+	$(PYTHON) -m pip install -e ".[report,dev]"
 
 setup-engine:  ## Download the prebuilt llama.cpp for this platform (no compiler needed)
 	$(FF) setup-engine
@@ -41,6 +43,12 @@ download:  ## Download the default smoke model only
 
 bench:  ## Prefill/TTFT benchmark sweep (Phase 1)
 	$(FF) bench
+
+report:  ## Render the before/after report from bench/results
+	$(FF) report
+
+report-demo:  ## Render a synthetic DEMO report (no Arm box needed)
+	$(FF) report --demo
 
 test:  ## Unit tests
 	$(PYTHON) -m pytest

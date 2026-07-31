@@ -1,23 +1,22 @@
-# Arm FirstFlight — v2: Benchmark core
+# Arm FirstFlight — v3: Report generator
 
-> **Cumulative review build. v2 = v1 + the benchmark engine.** Independently runnable.
+> **Cumulative review build. v3 = v2 + the report generator.** Independently runnable.
 > Stages: v1 foundation+smoke · v2 benchmark · v3 report · v4 profiling · v5 experiments+quality · v6 autotuner · v7 full integration
 
-This stage adds **`firstflight bench`**: drives `llama-bench` across a context-length sweep from
-`configs/workloads.yaml`, capturing prefill (pp) + generation (tg) throughput, **derived TTFT**,
-per-point variance, and **peak memory** (per-child isolation via GNU time when available) ->
-structured results in `bench/results/*.json`. `firstflight run` does a single point; `--dry-run`
-prints the command.
+This stage adds **`firstflight report`**: a clean **standalone HTML + markdown** report from
+`bench/results/*.json` — headline-led, matplotlib charts (prefill-TTFT scaling, throughput, cost),
+a **$/M-token** column (real instance prices in `configs/instances.yaml`), and a quality column
+(populated from v5 onward). `--demo` previews the layout with clearly-labeled synthetic data.
 
 ## Install & run (any machine)
 ```bash
 python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-firstflight setup-engine         # prebuilt llama.cpp -> real sweeps on any machine
-firstflight bench --dry-run
+pip install -e ".[report,dev]"
+firstflight report --demo        # full standalone HTML/markdown report
+firstflight bench --dry-run      # prints the llama-bench command
 pytest
 ```
-The next stage (**v3**) renders these JSON results into the standalone HTML report.
+The next stage (**v4**) adds Arm Performix profiling that feeds a hotspots section into this report.
 
 ## Commands
-`setup-engine · info · smoke · download · run · bench · ttft · throughput`
+`setup-engine · info · smoke · download · run · bench · ttft · throughput · report`

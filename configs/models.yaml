@@ -59,22 +59,23 @@ models:
         url: "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q8_0.gguf"  # verified 2026-06-26
         sha256: ""
 
-  # ---- Larger models for the real Arm benchmarks (fill URLs after confirming) ----
-  # Uncomment and verify before using on a remote Arm VM. These are the before/after
-  # quant-comparison + prefill-scaling targets in Phase 1/4.
-  #
-  # llama-3.2-1b-instruct:
-  #   hf_repo: bartowski/Llama-3.2-1B-Instruct-GGUF
-  #   description: "Llama 3.2 1B Instruct."
-  #   variants:
-  #     q4_0:   { file: Llama-3.2-1B-Instruct-Q4_0.gguf,   url: "" }   # TODO(confirm)
-  #     q4_k_m: { file: Llama-3.2-1B-Instruct-Q4_K_M.gguf, url: "" }   # TODO(confirm)
-  #     q8_0:   { file: Llama-3.2-1B-Instruct-Q8_0.gguf,   url: "" }   # TODO(confirm)
-  #
-  # qwen2.5-3b-instruct:
-  #   hf_repo: Qwen/Qwen2.5-3B-Instruct-GGUF
-  #   description: "Qwen2.5 3B Instruct — heavier prefill-scaling target."
-  #   variants:
-  #     q4_0:   { file: qwen2.5-3b-instruct-q4_0.gguf,   url: "" }     # TODO(confirm)
-  #     q4_k_m: { file: qwen2.5-3b-instruct-q4_k_m.gguf, url: "" }     # TODO(confirm)
-  #     q8_0:   { file: qwen2.5-3b-instruct-q8_0.gguf,   url: "" }     # TODO(confirm)
+  # ---- Larger model for headline runs (32k context on 0.5B is an odd regime; run the real
+  # ---- before/after here where the TTFT pain is realistic). Same family/tokenizer as the
+  # ---- smoke model, so it also enables a future speculative-decoding pairing.
+  qwen2.5-1.5b-instruct:
+    hf_repo: Qwen/Qwen2.5-1.5B-Instruct-GGUF
+    description: "Qwen2.5 1.5B Instruct — headline-run target (all URLs verified 2026-07-30, GGUF magic + sizes)."
+    variants:
+      q4_0:
+        file: qwen2.5-1.5b-instruct-q4_0.gguf
+        url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_0.gguf"  # verified 2026-07-30 (1.07 GB)
+        sha256: ""
+      q4_k_m:
+        file: qwen2.5-1.5b-instruct-q4_k_m.gguf
+        url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"  # verified 2026-07-30 (1.12 GB)
+        sha256: ""
+      q8_0:
+        file: qwen2.5-1.5b-instruct-q8_0.gguf
+        url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q8_0.gguf"  # verified 2026-07-30 (1.89 GB)
+        sha256: ""
+  # Even larger (3B+) targets: verify URLs the same way before adding (ranged GET, GGUF magic).

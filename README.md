@@ -1,26 +1,23 @@
-# Arm FirstFlight — v1: Foundation + smoke
+# Arm FirstFlight — v2: Benchmark core
 
-> **Cumulative review build. v1 is the base layer: package + config + engine bootstrap.** Independently runnable.
+> **Cumulative review build. v2 = v1 + the benchmark engine.** Independently runnable.
 > Stages: v1 foundation+smoke · v2 benchmark · v3 report · v4 profiling · v5 experiments+quality · v6 autotuner · v7 full integration
 
-The foundation: a pinned, installable Python package (`firstflight`) with the **config layer**
-(`configs/*.yaml` + typed loaders), platform/Arm detection, the **$/M-token cost math** (real
-verified instance prices), llama.cpp **binary discovery**, **`setup-engine`** (auto-download the
-prebuilt llama.cpp for THIS platform — Win/Linux/mac, x64/arm64, no compiler), **KleidiAI-active
-detection**, and on-demand **model download**. `firstflight smoke` proves the pipeline with real
-inference anywhere; without an engine it skips cleanly with a message.
+This stage adds **`firstflight bench`**: drives `llama-bench` across a context-length sweep from
+`configs/workloads.yaml`, capturing prefill (pp) + generation (tg) throughput, **derived TTFT**,
+per-point variance, and **peak memory** (per-child isolation via GNU time when available) ->
+structured results in `bench/results/*.json`. `firstflight run` does a single point; `--dry-run`
+prints the command.
 
 ## Install & run (any machine)
 ```bash
 python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-firstflight setup-engine         # prebuilt llama.cpp for THIS platform
-firstflight info
-firstflight smoke                # real model download + real generation
+firstflight setup-engine         # prebuilt llama.cpp -> real sweeps on any machine
+firstflight bench --dry-run
 pytest
 ```
-Later stages add: benchmark sweep (**v2**), report (**v3**), Performix profiling (**v4**),
-experiments + quality (**v5**), autotuner (**v6**), full integration (**v7**).
+The next stage (**v3**) renders these JSON results into the standalone HTML report.
 
 ## Commands
-`setup-engine · info · smoke · download`
+`setup-engine · info · smoke · download · run · bench · ttft · throughput`

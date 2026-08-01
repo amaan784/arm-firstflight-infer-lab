@@ -1,7 +1,7 @@
 """`firstflight` command-line entrypoint.
 
 Subcommands: setup-engine · info · smoke · download · run · bench · ttft · throughput ·
-report. All skip cleanly off Arm / without a llama.cpp build.
+profile · report. All no-op gracefully off Arm / without a llama.cpp build.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ def info() -> None:
     """Print environment + config summary."""
     from .config import load_instances, load_models, load_workloads
     from .engines import llama_cpp
+    from .profile.performix import PerformixProfiler
 
     table = Table(title="firstflight environment", show_header=False, title_style="bold")
     table.add_column("k", style="cyan", no_wrap=True)
@@ -40,6 +41,7 @@ def info() -> None:
     bench = llama_cpp.find_binary("bench")
     table.add_row("llama-cli", str(cli) if cli else "[yellow]not found[/]")
     table.add_row("llama-bench", str(bench) if bench else "[yellow]not found[/]")
+    table.add_row("performix (apx)", "available" if PerformixProfiler().available() else "n/a")
 
     try:
         models = load_models()
@@ -200,7 +202,7 @@ def bench(
 @click.option("--model", "model_id", default=None, help="Model id (default: smoke model).")
 @click.option("--variant", default=None, help="Quant variant (default: model's default).")
 @click.option("--threads", type=int, default=None, help="Thread count (default: auto).")
-@click.option("--port", type=int, default=8033, show_default=True, help="Local server port.")
+@click.option("--port", type=int, default=None, help="Local server port (default: auto ephemeral).")
 @click.option(
     "--mlock",
     is_flag=True,
@@ -258,6 +260,29 @@ def throughput(npp, ntg, levels, model_id, variant, threads, no_download) -> Non
             npp=npp,
             ntg=ntg,
             levels=[int(x) for x in levels.split(",") if x.strip()],
+            threads=threads,
+            download=not no_download,
+        )
+    )
+
+
+@main.command()
+@click.option(
+    "--prompt-len", type=int, default=2048, show_default=True, help="Prefill context to profile."
+)
+@click.option("--model", "model_id", default=None, help="Model id (default: smoke model).")
+@click.option("--variant", default=None, help="Quant variant (default: model's default).")
+@click.option("--threads", type=int, default=None, help="Thread count (default: auto).")
+@click.option("--no-download", is_flag=True, help="Require the model cached; don't download.")
+def profile(prompt_len, model_id, variant, threads, no_download) -> None:
+    """Profile a representative prefill run with Arm Performix (apx); no-op off Arm."""
+    from .runner import profile as run_profile
+
+    sys.exit(
+        run_profile(
+            model_id=model_id,
+            variant=variant,
+            prompt_len=prompt_len,
             threads=threads,
             download=not no_download,
         )

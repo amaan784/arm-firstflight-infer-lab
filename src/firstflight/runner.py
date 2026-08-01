@@ -203,7 +203,7 @@ def ttft(
     prefix_tokens: int = 2048,
     cache_reuse: int = 256,
     threads: int | None = None,
-    port: int = 8033,
+    port: int | None = None,
     n_predict: int = 16,
     mlock: bool = False,
     download: bool = True,
@@ -240,19 +240,33 @@ def ttft(
         if not model_path.exists():
             return _skip(f"model not present ({model_path.name}) and --no-download set.")
 
+    # Ephemeral port by default: a fixed port could race a stale/foreign server and measure
+    # the wrong model. --port still allows an explicit choice.
+    if port is None:
+        port = tmod.free_port()
     base = f"http://127.0.0.1:{port}"
+    # Context must hold the whole prefix + question + generation; the 4-chars/token sizing
+    # heuristic can undershoot tokens, so pad generously (server default 4096 would truncate).
+    ctx = int(prefix_tokens * 1.6) + n_predict + 256
     cmd = tmod.build_server_cmd(
-        server_bin, model_path, port=port, threads=threads, cache_reuse=cache_reuse, mlock=mlock
+        server_bin,
+        model_path,
+        port=port,
+        threads=threads,
+        cache_reuse=cache_reuse,
+        mlock=mlock,
+        ctx=ctx,
     )
     console.print(f"Server: [green]{server_bin}[/]  (--cache-reuse {cache_reuse}, port {port})")
     console.print(f"Prefix target: ~{prefix_tokens} tokens; measuring cold vs warm turn...")
 
+    # stdout/stderr -> DEVNULL: an undrained PIPE fills the OS buffer and BLOCKS the server
+    # mid-request (observed class of bug); we only need the HTTP responses.
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         tmod.wait_ready(base, proc=proc)
@@ -270,6 +284,7 @@ def ttft(
             proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait(timeout=15)
 
     result = tmod.TtftResult(
         timestamp=datetime.now(UTC).isoformat(),
@@ -416,4 +431,67 @@ def report(
     console.print(f"  HTML:   {paths.html}")
     console.print(f"  MD:     {paths.markdown}")
     console.print(f"  charts: {len(paths.charts)} PNG(s)")
+    return 0
+
+
+def profile(
+    *,
+    model_id: str | None = None,
+    variant: str | None = None,
+    prompt_len: int = 2048,
+    threads: int | None = None,
+    download: bool = True,
+) -> int:
+    """Profile a representative prefill run with Arm Performix (apx). No-op off Arm."""
+    from .profile.performix import PerformixProfiler, profile_filename
+
+    console.rule("[bold]firstflight profile[/]")
+    prof = PerformixProfiler()
+    if not prof.available():
+        console.print(f"[yellow]Performix unavailable:[/] {prof.unavailable_reason()}")
+        console.print("[dim]Off-Arm this is expected - profiling no-ops with this message.[/]")
+        return 0
+
+    models = load_models()
+    spec, variant = _resolve_model(models, model_id, variant)
+    mv = spec.variant(variant)
+
+    bench_bin = llama_cpp.find_binary("bench")
+    if bench_bin is None:
+        return _skip("no llama.cpp `llama-bench` binary to profile.")
+
+    if download:
+        try:
+            model_path = ensure_model(spec, mv)
+        except Exception as exc:
+            console.print(f"[red]Download failed:[/] {safe(str(exc))}")
+            return 1
+    else:
+        model_path = model_dir() / mv.file
+        if not model_path.exists():
+            return _skip(f"model not present ({model_path.name}) and --no-download set.")
+
+    target = prefill.build_llama_bench_command(
+        bench_bin, model_path, [prompt_len], [0], threads, 1, "json"
+    )
+    console.print(f"Profiling prefill @ {prompt_len} tokens with Arm Performix (apx)...")
+    result = prof.profile(target)
+
+    if result.skipped:
+        console.print(f"[yellow]Profile skipped:[/] {safe(result.reason)}")
+        return 0
+
+    out = results_dir() / profile_filename(result.timestamp)
+    result.save_json(out)
+
+    from rich.table import Table
+
+    table = Table(title="Top hotspots (Arm Performix)", title_style="bold")
+    table.add_column("function", style="cyan")
+    table.add_column("module", style="dim")
+    table.add_column("%", justify="right")
+    for h in result.hotspots:
+        table.add_row(h.function, h.module, f"{h.percent:.1f}")
+    console.print(table)
+    console.print(f"\n[green]OK[/] wrote {out}")
     return 0

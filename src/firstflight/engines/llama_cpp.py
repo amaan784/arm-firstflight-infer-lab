@@ -188,14 +188,25 @@ def run_once(
     """
     cmd = build_run_cmd(cli_bin, model_path, prompt, n_predict, threads, seed, temp)
     start = time.perf_counter()
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        # A hung generation becomes a clean failed RunResult — every caller already handles
+        # the non-ok path (smoke prints the error, probe scores the item wrong, detect->None).
+        return RunResult(
+            returncode=-1,
+            stdout="",
+            stderr=f"llama-cli timed out after {timeout:.0f}s",
+            wall_s=time.perf_counter() - start,
+            cmd=cmd,
+        )
     wall = time.perf_counter() - start
     return RunResult(
         returncode=proc.returncode,

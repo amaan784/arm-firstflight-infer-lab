@@ -25,6 +25,7 @@ from ..bench.result import BenchPoint, SweepResult
 from ..config import InstanceSpec, load_instances
 from ..cost import CostResult
 from ..cost import compute as compute_cost
+from ..profile.performix import Hotspot, ProfileResult
 from ..util import bytes_human, reports_dir, results_dir
 
 PALETTE = ["#0B7285", "#E8590C", "#5F3DC4", "#2B8A3E", "#A61E4D", "#1864AB"]
@@ -47,22 +48,82 @@ def _is_committed_example(path: Path) -> bool:
     return path.name.startswith("example_") or path.name == "profile_example.json"
 
 
+# Result files that are NOT llama-bench SweepResults (they have their own loaders/sections).
+_OTHER_PREFIXES = ("profile_", "ttft_", "throughput_", "autotune_")
+
+
 def load_results(source: Path | None = None) -> list[SweepResult]:
     """Load real SweepResults from a directory (default bench/results), sorted by timestamp.
 
     Committed synthetic examples (example_*.json) are excluded — see _is_committed_example.
+    Non-sweep result files (profile_/ttft_/throughput_/autotune_) are skipped explicitly.
     """
     source = source or results_dir()
     files = sorted(source.glob("*.json")) if source.is_dir() else [source]
     out: list[SweepResult] = []
     for f in files:
-        if _is_committed_example(f):
+        if _is_committed_example(f) or f.name.startswith(_OTHER_PREFIXES):
             continue
         try:
             out.append(SweepResult.load_json(f))
         except Exception:  # noqa: BLE001 - skip unparseable, keep going
             continue
     out.sort(key=lambda r: r.timestamp)
+    return out
+
+
+def load_ttft_results(source: Path | None = None) -> list:
+    """Load measured-TTFT results (ttft_*.json), oldest->newest."""
+    from ..bench.ttft import TtftResult
+
+    source = source or results_dir()
+    if not source.is_dir():
+        return []
+    out = []
+    for f in sorted(source.glob("ttft_*.json")):
+        if _is_committed_example(f):
+            continue
+        try:
+            out.append(TtftResult.load_json(f))
+        except Exception:  # noqa: BLE001
+            continue
+    out.sort(key=lambda r: r.timestamp)
+    return out
+
+
+def load_throughput_results(source: Path | None = None) -> list:
+    """Load concurrency-sweep results (throughput_*.json), oldest->newest."""
+    from ..bench.throughput import ThroughputResult
+
+    source = source or results_dir()
+    if not source.is_dir():
+        return []
+    out = []
+    for f in sorted(source.glob("throughput_*.json")):
+        if _is_committed_example(f):
+            continue
+        try:
+            out.append(ThroughputResult.load_json(f))
+        except Exception:  # noqa: BLE001
+            continue
+    out.sort(key=lambda r: r.timestamp)
+    return out
+
+
+def load_profiles(source: Path | None = None) -> list[ProfileResult]:
+    """Load Performix profile JSONs (profile_*.json) from a directory, sorted by timestamp."""
+    source = source or results_dir()
+    if not source.is_dir():
+        return []
+    out: list[ProfileResult] = []
+    for f in sorted(source.glob("profile_*.json")):
+        if _is_committed_example(f):
+            continue
+        try:
+            out.append(ProfileResult.load_json(f))
+        except Exception:  # noqa: BLE001
+            continue
+    out.sort(key=lambda p: p.timestamp)
     return out
 
 
@@ -103,9 +164,12 @@ class ReportModel:
     contexts: list[int] = field(default_factory=list)
     prefill_table: list[dict] = field(default_factory=list)
     quality_note: str = ""
-    hotspots: list = field(default_factory=list)
+    hotspots: list[Hotspot] = field(default_factory=list)
     profile_target: str = ""
     thp: str = ""  # transparent-hugepage mode captured with the results (run evidence)
+    ttft_runs: list = field(default_factory=list)  # measured-TTFT (bench/ttft.py) results
+    throughput_runs: list = field(default_factory=list)  # concurrency sweeps (bench/throughput.py)
+    duplicates_dropped: list = field(default_factory=list)  # older same-label runs superseded
 
 
 def _prefill_map(r: SweepResult) -> dict[int, BenchPoint]:
@@ -163,7 +227,9 @@ def build_report_model(
     instance: InstanceSpec,
     *,
     demo: bool = False,
-    profiles: list | None = None,
+    profiles: list[ProfileResult] | None = None,
+    ttft_results: list | None = None,
+    throughput_results: list | None = None,
     title: str = "Arm FirstFlight - Inference Optimization Report",
 ) -> ReportModel:
     if not results:
@@ -172,6 +238,17 @@ def build_report_model(
     # Honesty: if any result is synthetic, force the DEMO banner even outside --demo mode
     # (e.g. when rendering the committed example results).
     demo = demo or any("SYNTHETIC" in (r.host.cpu_info or "") for r in results)
+
+    # De-duplicate labels, keeping the NEWEST run per label (results are timestamp-sorted).
+    # Otherwise re-running `bench --label baseline` yields duplicate columns showing mixed
+    # data, and the headline could compare against a stale run.
+    by_label: dict[str, SweepResult] = {}
+    dropped: list[str] = []
+    for r in results:
+        if r.label in by_label:
+            dropped.append(f"{r.label} @ {by_label[r.label].timestamp}")
+        by_label[r.label] = r
+    results = list(by_label.values())
 
     price = instance.usd_per_hour
     priced = price > 0
@@ -220,6 +297,15 @@ def build_report_model(
     others = [r for r in results if r is not baseline]
     headline_main, subs, cards = _headline(baseline, others, rows, instance, priced)
 
+    # Measured-TTFT prompt-cache evidence gets a headline sub-bullet (newest run).
+    ttft_runs = list(ttft_results or [])
+    if ttft_runs:
+        t = ttft_runs[-1]
+        subs.append(
+            f"measured prompt-cache TTFT: cold {t.cold.prompt_ms:.0f}ms -> warm "
+            f"{t.warm.prompt_ms:.0f}ms ({t.reduction_pct:.0f}% less prefill on the warm turn)"
+        )
+
     has_quality = any(_quality_acc(r.quality) is not None for r in results)
     quality = (
         "Quality = a small exact-match probe via llama-cli (a regression guardrail, not a "
@@ -230,7 +316,7 @@ def build_report_model(
     )
 
     # Newest non-skipped Performix profile, if any.
-    hotspots: list = []
+    hotspots: list[Hotspot] = []
     profile_target = ""
     for p in reversed(profiles or []):
         if not p.skipped and p.hotspots:
@@ -258,6 +344,9 @@ def build_report_model(
         hotspots=hotspots,
         profile_target=profile_target,
         thp=getattr(results[0].host, "thp", "") or "",
+        ttft_runs=ttft_runs,
+        throughput_runs=list(throughput_results or []),
+        duplicates_dropped=dropped,
     )
 
 
@@ -553,6 +642,46 @@ def build_markdown(model: ReportModel, charts: list[Chart], stem: str) -> str:
         lines.append(f"| {row['ctx']:,} | " + " | ".join(cells) + " |")
     lines.append("")
 
+    if model.ttft_runs:
+        lines.append("## Measured TTFT - prompt cache, cold vs warm\n")
+        lines.append(
+            "_llama-server's own `timings` (includes tokenization). Cold = full shared prefix "
+            "prefilled; warm = same prefix, new question, KV cache re-used (`cache_prompt` + "
+            "`--cache-reuse`)._\n"
+        )
+        lines.append(
+            "| model:variant | cache-reuse | cold tokens | cold ms | warm tokens | warm ms | prefill saved |"
+        )
+        lines.append("|---|---:|---:|---:|---:|---:|---:|")
+        for t in model.ttft_runs:
+            lines.append(
+                f"| {t.model}:{t.variant} | {t.cache_reuse} | {t.cold.prompt_n} | "
+                f"{t.cold.prompt_ms:.0f} | {t.warm.prompt_n} | {t.warm.prompt_ms:.0f} | "
+                f"{t.reduction_pct:.0f}% |"
+            )
+        lines.append("")
+
+    if model.throughput_runs:
+        lines.append("## Throughput vs parallel requests (llama-batched-bench)\n")
+        lines.append("_Aggregate tokens/sec across all concurrent sequences._\n")
+        for run in model.throughput_runs:
+            lines.append(
+                f"**{run.model}:{run.variant}** - {run.npp} prompt + {run.ntg} gen tokens per request\n"
+            )
+            lines.append("| parallel | prefill tok/s | gen tok/s | total tok/s |")
+            lines.append("|---:|---:|---:|---:|")
+            for p in sorted(run.points, key=lambda x: x.parallel):
+                lines.append(
+                    f"| {p.parallel} | {p.speed_pp:.1f} | {p.speed_tg:.1f} | {p.speed:.1f} |"
+                )
+            lines.append("")
+
+    if model.duplicates_dropped:
+        lines.append(
+            f"_Note: {len(model.duplicates_dropped)} older run(s) with duplicate labels were "
+            f"superseded by newer runs: {', '.join(model.duplicates_dropped)}._\n"
+        )
+
     if model.hotspots:
         lines.append("## Top hotspots (Arm Performix)\n")
         if model.profile_target:
@@ -629,6 +758,21 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;border-top:1px solid va
 <tbody>{% for row in m.prefill_table %}<tr><td>{{ "{:,}".format(row.ctx) }}</td>{% for l in m.labels %}<td>{{ row.cells[l].ttft }}</td><td>{{ row.cells[l].tput }}</td>{% endfor %}</tr>{% endfor %}</tbody>
 </table></section>
 
+{% if m.ttft_runs %}<section><h2>Measured TTFT &mdash; prompt cache, cold vs warm</h2>
+<div class="note">llama-server's own <code>timings</code> (includes tokenization). Cold = full shared prefix prefilled; warm = same prefix, new question, KV cache re-used.</div>
+<table><thead><tr><th>model:variant</th><th>cache-reuse</th><th>cold tokens</th><th>cold ms</th><th>warm tokens</th><th>warm ms</th><th>prefill saved</th></tr></thead>
+<tbody>{% for t in m.ttft_runs %}<tr><td>{{ t.model }}:{{ t.variant }}</td><td>{{ t.cache_reuse }}</td><td>{{ t.cold.prompt_n }}</td><td>{{ "%.0f"|format(t.cold.prompt_ms) }}</td><td>{{ t.warm.prompt_n }}</td><td>{{ "%.0f"|format(t.warm.prompt_ms) }}</td><td>{{ "%.0f"|format(t.reduction_pct) }}%</td></tr>{% endfor %}</tbody>
+</table></section>{% endif %}
+
+{% if m.throughput_runs %}<section><h2>Throughput vs parallel requests</h2>
+<div class="note">Aggregate tokens/sec across all concurrent sequences (llama-batched-bench).</div>
+{% for run in m.throughput_runs %}<div class="note"><b>{{ run.model }}:{{ run.variant }}</b> &mdash; {{ run.npp }} prompt + {{ run.ntg }} gen tokens per request</div>
+<table><thead><tr><th>parallel</th><th>prefill tok/s</th><th>gen tok/s</th><th>total tok/s</th></tr></thead>
+<tbody>{% for p in run.points|sort(attribute="parallel") %}<tr><td>{{ p.parallel }}</td><td>{{ "%.1f"|format(p.speed_pp) }}</td><td>{{ "%.1f"|format(p.speed_tg) }}</td><td>{{ "%.1f"|format(p.speed) }}</td></tr>{% endfor %}</tbody>
+</table>{% endfor %}</section>{% endif %}
+
+{% if m.duplicates_dropped %}<div class="note">Note: {{ m.duplicates_dropped|length }} older run(s) with duplicate labels were superseded by newer runs.</div>{% endif %}
+
 {% if m.hotspots %}<section><h2>Top hotspots (Arm Performix)</h2>
 {% if m.profile_target %}<div class="note">profiled: <code>{{ m.profile_target }}</code></div>{% endif %}
 <table><thead><tr><th>function</th><th>module</th><th>% CPU</th></tr></thead>
@@ -689,16 +833,27 @@ def render_report(
 
     if demo:
         results, instance = synthetic_results()
-        profiles = []
+        ttft_res = [synthetic_ttft()]
+        tp_res = [synthetic_throughput()]
+        profiles = [synthetic_profile()]
     else:
         results = results if results is not None else load_results(results_source)
         instance = instances.get(instance_name)
-        profiles = []
+        ttft_res = load_ttft_results(results_source)
+        tp_res = load_throughput_results(results_source)
+        profiles = load_profiles(results_source)
 
     if not results:
         return None
 
-    model = build_report_model(results, instance, demo=demo, profiles=profiles)
+    model = build_report_model(
+        results,
+        instance,
+        demo=demo,
+        profiles=profiles,
+        ttft_results=ttft_res,
+        throughput_results=tp_res,
+    )
     charts = build_charts(results, instance)  # raises ReportError if deps missing
 
     out_dir = out_dir or reports_dir()
@@ -788,3 +943,58 @@ def synthetic_results() -> tuple[list[SweepResult], InstanceSpec]:
         notes="real instance price; synthetic perf data",
     )
     return [baseline, optimized], instance
+
+
+def synthetic_ttft():
+    """Plausible-but-fake measured-TTFT prompt-cache pair for the DEMO report (NOT measured)."""
+    from ..bench.ttft import Timings, TtftResult
+
+    return TtftResult(
+        timestamp="2026-06-26T12:00:00+00:00",
+        model="qwen2.5-0.5b-instruct [SYNTHETIC]",
+        variant="q4_0",
+        prefix_target_tokens=2048,
+        cache_reuse=256,
+        threads=8,
+        cold=Timings(prompt_n=2071, prompt_ms=1620.0, predicted_n=16, predicted_ms=210.0),
+        warm=Timings(prompt_n=23, prompt_ms=42.0, predicted_n=16, predicted_ms=205.0),
+    )
+
+
+def synthetic_throughput():
+    """Plausible-but-fake concurrency sweep for the DEMO report (NOT measured)."""
+    from ..bench.throughput import ThroughputPoint, ThroughputResult
+
+    pts = [
+        ThroughputPoint(1, 1024, 32, 1450.0, 55.0, 590.0),
+        ThroughputPoint(2, 1024, 32, 2500.0, 92.0, 1010.0),
+        ThroughputPoint(4, 1024, 32, 3900.0, 138.0, 1580.0),
+        ThroughputPoint(8, 1024, 32, 4600.0, 161.0, 1890.0),
+    ]
+    return ThroughputResult(
+        timestamp="2026-06-26T12:00:00+00:00",
+        model="qwen2.5-0.5b-instruct [SYNTHETIC]",
+        variant="q4_0",
+        npp=1024,
+        ntg=32,
+        threads=8,
+        points=pts,
+    )
+
+
+def synthetic_profile() -> ProfileResult:
+    """Plausible-but-fake Arm Performix hotspots for the DEMO report (NOT measured)."""
+    hotspots = [
+        Hotspot("kai_matmul_clamp_f32_qai8dxp_qsi4c32p", 41.7, "libggml-cpu.so"),
+        Hotspot("ggml_compute_forward_mul_mat", 18.3, "libggml-cpu.so"),
+        Hotspot("ggml_vec_dot_q8_0_q8_0", 9.6, "libggml-cpu.so"),
+        Hotspot("ggml_compute_forward_soft_max", 5.1, "libggml-cpu.so"),
+        Hotspot("ggml_compute_forward_rope", 4.2, "libggml-cpu.so"),
+        Hotspot("memcpy", 3.0, "libc.so.6"),
+    ]
+    return ProfileResult(
+        skipped=False,
+        timestamp="2026-06-26T12:00:00+00:00",
+        target="llama-bench -m qwen2.5-0.5b-instruct-q4_0.gguf -p 2048 -n 0 -r 1 [SYNTHETIC]",
+        hotspots=hotspots,
+    )

@@ -104,22 +104,28 @@ def setup_engine(
     url = RELEASE_URL.format(tag=tag, asset=asset)
     dest.mkdir(parents=True, exist_ok=True)
     archive = dest / asset
+    partial = archive.with_suffix(archive.suffix + ".part")
 
     console.print(f"Fetching llama.cpp [bold]{tag}[/] ({asset})")
-    with requests.get(url, stream=True, timeout=60, allow_redirects=True) as resp:
-        if resp.status_code == 404:
-            raise EngineFetchError(
-                f"release asset not found: {url}\n"
-                "The tag or asset name may have changed — check "
-                "https://github.com/ggml-org/llama.cpp/releases and pass --tag."
-            )
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0))
-        with archive.open("wb") as fh, tqdm(total=total, unit="B", unit_scale=True) as bar:
-            for chunk in resp.iter_content(chunk_size=1 << 20):
-                fh.write(chunk)
-                bar.update(len(chunk))
+    try:
+        with requests.get(url, stream=True, timeout=60, allow_redirects=True) as resp:
+            if resp.status_code == 404:
+                raise EngineFetchError(
+                    f"release asset not found: {url}\n"
+                    "The tag or asset name may have changed — check "
+                    "https://github.com/ggml-org/llama.cpp/releases and pass --tag."
+                )
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            with partial.open("wb") as fh, tqdm(total=total, unit="B", unit_scale=True) as bar:
+                for chunk in resp.iter_content(chunk_size=1 << 20):
+                    fh.write(chunk)
+                    bar.update(len(chunk))
+    except requests.RequestException as exc:
+        partial.unlink(missing_ok=True)
+        raise EngineFetchError(f"download failed ({type(exc).__name__}): {exc}") from exc
 
+    partial.replace(archive)  # atomic: no half-written archive next to the binaries
     console.print(f"Extracting ({bytes_human(archive.stat().st_size)})...")
     _extract(archive, dest)
     archive.unlink(missing_ok=True)

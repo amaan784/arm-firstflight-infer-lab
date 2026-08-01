@@ -7,9 +7,9 @@ prebuilt archives `setup-engine` fetches) measures throughput at parallel levels
 
 Flags verified against the real b9873 binary (2026-07-30): `-npp n0,n1,...`, `-ntg`, `-npl`,
 and `--output-format {md,jsonl}` — we use **jsonl** (one JSON object per completed run).
-TODO(confirm): the exact jsonl field names on the box; parsing below is tolerant (accepts the
-known aliases, keeps every raw row verbatim in the saved JSON so nothing is lost even if a
-key is missed).
+JSONL field names VERIFIED against llama.cpp master source (tools/batched-bench, 2026-07-31):
+pp, tg, pl, n_kv, t_pp, speed_pp, t_tg, speed_tg, t, speed — exactly the primary keys the
+parser below reads (aliases retained as belt-and-braces; raw rows always preserved).
 """
 
 from __future__ import annotations
@@ -131,6 +131,23 @@ class ThroughputResult:
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
         return path
 
+    @classmethod
+    def from_dict(cls, d: dict) -> ThroughputResult:
+        return cls(
+            timestamp=str(d.get("timestamp", "")),
+            model=str(d.get("model", "")),
+            variant=str(d.get("variant", "")),
+            npp=int(d.get("npp", 0)),
+            ntg=int(d.get("ntg", 0)),
+            threads=d.get("threads"),
+            points=[ThroughputPoint(**p) for p in d.get("points", [])],
+            notes=str(d.get("notes", "")),
+        )
+
+    @classmethod
+    def load_json(cls, path: Path) -> ThroughputResult:
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
 
 def run_sweep(
     *,
@@ -142,13 +159,21 @@ def run_sweep(
     threads: int | None,
     timeout: float = 3600.0,
 ) -> list[ThroughputPoint]:
-    """Execute the parallel-level sweep. Raises ThroughputError on failure."""
+    """Execute the parallel-level sweep. Raises ThroughputError on failure (incl. timeout)."""
     cmd = build_batched_bench_command(
         bench_bin, model_path, npp=npp, ntg=ntg, levels=levels, threads=threads
     )
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout, check=False, stdin=subprocess.DEVNULL
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ThroughputError(f"llama-batched-bench timed out after {timeout:.0f}s") from exc
     if proc.returncode != 0:
         raise ThroughputError(
             f"llama-batched-bench exited {proc.returncode}\n{proc.stderr.strip()[-1200:]}"
@@ -158,5 +183,10 @@ def run_sweep(
         raise ThroughputError(
             "no jsonl rows parsed from llama-batched-bench output "
             f"(first 400 chars): {proc.stdout[:400]}"
+        )
+    if all(p.speed <= 0 and p.speed_pp <= 0 for p in points):
+        raise ThroughputError(
+            "all parsed points have zero speeds - output shape unexpected; raw rows kept in "
+            "the exception context: " + str(points[0].raw)[:300]
         )
     return points

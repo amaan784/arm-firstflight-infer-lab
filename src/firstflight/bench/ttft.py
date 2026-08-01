@@ -14,8 +14,10 @@ chunks via KV shifting. So for two requests sharing a long system/context prefix
   turn 1 (cold): the full prefix is prefilled  -> large prompt_ms, prompt_n ≈ full prompt
   turn 2 (warm): only the new question is prefilled -> prompt_ms collapses, prompt_n is tiny
 
-Flags/fields per the llama-server README (verified during research, 2026-07-07): `/health`
-readiness endpoint, `/completion` with `cache_prompt` + `n_predict`, response `timings`.
+Flags/fields VERIFIED against llama.cpp master source (2026-07-31): `/health` returns 503
+while loading and 200 {"status":"ok"} when ready; `/completion` accepts `cache_prompt`
+(default true) + `n_predict`; the response `timings` object carries prompt_n / prompt_ms /
+predicted_n / predicted_ms (result_timings::to_json).
 Everything degrades gracefully: no llama-server binary -> clean skip; startup/HTTP failures
 -> clear error, server always torn down.
 """
@@ -123,8 +125,36 @@ class TtftResult:
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
         return path
 
+    @classmethod
+    def from_dict(cls, d: dict) -> TtftResult:
+        return cls(
+            timestamp=str(d.get("timestamp", "")),
+            model=str(d.get("model", "")),
+            variant=str(d.get("variant", "")),
+            prefix_target_tokens=int(d.get("prefix_target_tokens", 0)),
+            cache_reuse=int(d.get("cache_reuse", 0)),
+            threads=d.get("threads"),
+            cold=Timings(**d["cold"]),
+            warm=Timings(**d["warm"]),
+            notes=str(d.get("notes", "")),
+            extra=d.get("extra") or {},
+        )
+
+    @classmethod
+    def load_json(cls, path: Path) -> TtftResult:
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
 
 # --- server lifecycle ---------------------------------------------------------
+
+
+def free_port(host: str = "127.0.0.1") -> int:
+    """An ephemeral free TCP port — avoids racing a stale/foreign server on a fixed port."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        return s.getsockname()[1]
 
 
 def build_server_cmd(
@@ -136,6 +166,7 @@ def build_server_cmd(
     threads: int | None = None,
     cache_reuse: int = 256,
     mlock: bool = False,
+    ctx: int | None = None,
 ) -> list[str]:
     cmd = [
         str(server_bin),
@@ -148,6 +179,10 @@ def build_server_cmd(
         "--cache-reuse",
         str(cache_reuse),
     ]
+    if ctx:
+        # must hold the full prefix + generation; llama-server's default (4096) silently
+        # truncates longer prefixes, which would break the shared-prefix premise
+        cmd += ["-c", str(ctx)]
     if threads:
         cmd += ["-t", str(threads)]
     if mlock:

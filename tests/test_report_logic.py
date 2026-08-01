@@ -72,6 +72,81 @@ def test_stddev_rendered_in_prefill_table():
     assert "±" in cell  # spread across repetitions is shown, not hidden
 
 
+def test_report_includes_hotspots():
+    results, instance = render.synthetic_results()
+    profile = render.synthetic_profile()
+    model = render.build_report_model(results, instance, demo=True, profiles=[profile])
+    assert model.hotspots
+    md = render.build_markdown(model, [], "s")
+    assert "Top hotspots" in md
+    assert "kai_matmul" in md or "ggml" in md
+
+
+def test_skipped_profile_is_ignored():
+    from firstflight.profile.performix import ProfileResult
+
+    results, instance = render.synthetic_results()
+    skipped = ProfileResult(skipped=True, reason="off arm")
+    model = render.build_report_model(results, instance, profiles=[skipped])
+    assert model.hotspots == []
+
+
+def test_committed_example_profiles_excluded(tmp_path):
+    # Regression: profile_example.json (synthetic hotspots) must not load into real reports.
+    from firstflight.profile.performix import ProfileResult
+
+    ProfileResult(skipped=False, timestamp="t", target="x").save_json(
+        tmp_path / "profile_example.json"
+    )
+    ProfileResult(skipped=False, timestamp="t", target="y").save_json(
+        tmp_path / "profile_real.json"
+    )
+    profs = render.load_profiles(tmp_path)
+    assert len(profs) == 1 and profs[0].target == "y"
+
+
+def test_measured_ttft_and_throughput_render_in_report():
+    # The newest evidence must appear in the WOW artifact, not just console output.
+    results, instance = render.synthetic_results()
+    model = render.build_report_model(
+        results,
+        instance,
+        demo=True,
+        ttft_results=[render.synthetic_ttft()],
+        throughput_results=[render.synthetic_throughput()],
+    )
+    md = render.build_markdown(model, [], "s")
+    assert "Measured TTFT" in md
+    assert "97%" in md or "prefill saved" in md  # cold 1620ms -> warm 42ms
+    assert "Throughput vs parallel requests" in md
+    assert any("measured prompt-cache TTFT" in s for s in model.headline_subs)
+
+
+def test_ttft_throughput_loaders(tmp_path):
+    render.synthetic_ttft().save_json(tmp_path / "ttft_20260101.json")
+    render.synthetic_throughput().save_json(tmp_path / "throughput_20260101.json")
+    # sweep loader must NOT try to parse them; dedicated loaders must find them
+    assert render.load_results(tmp_path) == []
+    assert len(render.load_ttft_results(tmp_path)) == 1
+    assert len(render.load_throughput_results(tmp_path)) == 1
+    assert render.load_ttft_results(tmp_path)[0].cold.prompt_n == 2071
+
+
+def test_duplicate_labels_deduped_keep_newest():
+    results, instance = render.synthetic_results()
+    old = results[0]  # label "baseline", timestamp 2026-06-26
+    import copy
+
+    newer = copy.deepcopy(old)
+    newer.timestamp = "2026-07-01T00:00:00+00:00"
+    newer.points[0].throughput_tok_s = 9999.0
+    model = render.build_report_model([old, newer, results[1]], instance, demo=True)
+    assert model.labels.count("baseline") == 1  # no duplicate columns
+    assert len(model.duplicates_dropped) == 1
+    base_cell = model.prefill_table[0]["cells"]["baseline"]["tput"]
+    assert base_cell.startswith("9999")  # the NEWEST run won
+
+
 def test_load_results_roundtrip(tmp_path):
     results, _ = render.synthetic_results()
     results[0].save_json(tmp_path / "a.json")

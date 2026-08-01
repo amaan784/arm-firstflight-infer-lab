@@ -48,6 +48,13 @@ def test_throughput_skips_without_binary(monkeypatch):
     assert "llama-batched-bench" in res.output
 
 
+def test_profile_noop_off_arm():
+    # On a non-Arm-Linux machine, profile no-ops cleanly (exit 0) with a clear reason.
+    res = CliRunner().invoke(main, ["profile"])
+    assert res.exit_code == 0
+    assert "unavailable" in res.output.lower()
+
+
 def test_report_no_results_is_graceful(tmp_path):
     # empty results dir -> friendly message, exit 0 (no matplotlib needed for this path)
     res = CliRunner().invoke(main, ["report", "--results-dir", str(tmp_path)])

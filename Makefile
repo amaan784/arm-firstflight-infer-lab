@@ -9,7 +9,7 @@ FF     ?= $(PYTHON) -m firstflight
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup setup-engine smoke info download bench report report-demo test lint format clean
+.PHONY: help setup setup-engine smoke ttft throughput info download bench profile report report-demo test lint format clean
 
 help:  ## Show this help
 	@echo "Arm FirstFlight — targets:"
@@ -18,7 +18,10 @@ help:  ## Show this help
 	@echo "  smoke     Download tiny model + run llama.cpp once (skips cleanly off-Arm/no binary)"
 	@echo "  info      Print environment + config summary"
 	@echo "  download  Download the default smoke model only"
-	@echo "  bench     Run the prefill/TTFT benchmark sweep            (Phase 1)"
+	@echo "  bench     Run the prefill/TTFT benchmark sweep"
+	@echo "  ttft      MEASURED TTFT + prompt-cache demo (llama-server timings)"
+	@echo "  throughput  Concurrency sweep: tok/s at 1/2/4/8 parallel requests"
+	@echo "  profile   Profile with Arm Performix (apx)                (no-op off Arm)"
 	@echo "  report    Render the before/after markdown + HTML report from bench/results"
 	@echo "  report-demo  Render a synthetic DEMO report (no Arm box needed)"
 	@echo "  test      Run unit tests (pytest)"
@@ -41,8 +44,17 @@ info:  ## Environment + config summary
 download:  ## Download the default smoke model only
 	$(FF) download
 
-bench:  ## Prefill/TTFT benchmark sweep (Phase 1)
+bench:  ## Prefill/TTFT benchmark sweep
 	$(FF) bench
+
+ttft:  ## Measured TTFT + prompt-cache demo (llama-server timings)
+	$(FF) ttft
+
+throughput:  ## Concurrency sweep via llama-batched-bench
+	$(FF) throughput
+
+profile:  ## Arm Performix profile
+	$(FF) profile
 
 report:  ## Render the before/after report from bench/results
 	$(FF) report

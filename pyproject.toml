@@ -37,6 +37,8 @@ dependencies = [
 report = ["matplotlib==3.11.0", "jinja2==3.1.6"]
 # Faster/auth'd model downloads (otherwise we stream the resolve URL via requests).
 hub = ["huggingface-hub==1.21.0"]
+# Quality eval. The light path needs no torch: `pip install 'lm-eval[api]'`.
+eval = ["lm-eval==0.4.12"]
 # Lint + test.
 dev = ["ruff==0.15.20", "pytest==9.1.1"]
 # Convenience: everything except the heavy eval extra.

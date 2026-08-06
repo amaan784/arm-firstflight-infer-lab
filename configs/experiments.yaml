@@ -1,0 +1,102 @@
+# Optimization experiments — the before/after axis, holding model + instance fixed.
+# Each experiment is a set of labelled configs that `firstflight experiment` benchmarks (and
+# quality-evals) so the report can show the speed delta AND that accuracy held.
+#
+# Axes you can vary per config: `variant` (quant), `threads`, `cpu_mask` (hex, for pinning),
+# `cpu_strict`, `flash_attn` (on/off), `cache_type_k`/`cache_type_v` (quantized KV-cache),
+# `ubatch_size` (prefill micro-batch), `gen`, a per-config `model` override, and `bin`
+# (a llama.cpp binary/dir override — e.g. a KleidiAI build). `bin` supports ${ENV_VAR}
+# expansion so you can point at two builds without editing this file.
+
+default_experiment: quant-sweep
+
+experiments:
+  quant-sweep:
+    description: "Q8_0 vs Q4_K_M vs Q4_0 at fixed threads (does int4 cost accuracy?)."
+    model: qwen2.5-0.5b-instruct             # official repo has all three (q4_0 verified 2026-07-07)
+    workload: rag-context
+    configs:
+      - { label: q8_0, variant: q8_0 }
+      - { label: q4_k_m, variant: q4_k_m }
+      - { label: q4_0, variant: q4_0 }       # KleidiAI accelerates Q4_0 (not Q4_K_M)
+
+  thread-sweep:
+    description: "Thread-count scaling at fixed quant."
+    model: qwen2.5-0.5b-instruct
+    workload: rag-context
+    configs:
+      - { label: t2, variant: q4_k_m, threads: 2 }
+      - { label: t4, variant: q4_k_m, threads: 4 }
+      - { label: t8, variant: q4_k_m, threads: 8 }
+
+  pinning:
+    description: "CPU pinning on/off (llama-bench -C/--cpu-mask + --cpu-strict)."
+    model: qwen2.5-0.5b-instruct
+    workload: rag-context
+    configs:
+      - { label: no-pin, variant: q4_k_m, threads: 4 }
+      - { label: pinned, variant: q4_k_m, threads: 4, cpu_mask: "0x0f", cpu_strict: true }  # TODO(confirm) mask for your CPU
+
+  kv-cache:
+    description: "KV-cache f16 vs quantized q8_0 cache (-ctk/-ctv) — memory-bandwidth axis."
+    model: qwen2.5-0.5b-instruct
+    workload: rag-context
+    configs:
+      # Quantizing the KV cache halves its footprint and eases memory-bandwidth pressure —
+      # increasingly the bottleneck at long context on Neoverse. Flags verified against the
+      # real b9873 llama-bench (2026-07-07). Watch the quality column for any cost.
+      # flash_attn is pinned ON for BOTH configs: quantized KV-cache without flash attention
+      # is dequantized every step and can be slower than f16 — FA must be a controlled
+      # variable here, not a confound.
+      - { label: kv-f16, variant: q4_0, threads: 4, flash_attn: "on" }
+      - label: kv-q8_0
+        variant: q4_0
+        threads: 4
+        flash_attn: "on"
+        cache_type_k: q8_0
+        cache_type_v: q8_0
+
+  prefill-batch:
+    description: "Prefill micro-batch sweep (-ub 256/512/1024/2048) — bigger GEMM tiles for the Arm kernels."
+    model: qwen2.5-0.5b-instruct
+    workload: rag-context
+    configs:
+      # -ub is the physical micro-batch used during prompt processing; larger values feed the
+      # KleidiAI/i8mm matmul kernels bigger tiles (community-reported prefill gains up to
+      # 2x). Costs RAM, not accuracy — the quality probe should be flat across these.
+      - { label: ub256, variant: q4_0, ubatch_size: 256 }
+      - { label: ub512, variant: q4_0, ubatch_size: 512 }   # llama-bench default
+      - { label: ub1024, variant: q4_0, ubatch_size: 1024 }
+      - { label: ub2048, variant: q4_0, ubatch_size: 2048 }
+
+  flash-attn:
+    description: "Flash attention on vs off for long-context prefill (CPU path)."
+    model: qwen2.5-0.5b-instruct
+    workload: rag-context
+    configs:
+      # -fa defaults to 'auto'; we pin it explicitly both ways to measure the CPU FA path
+      # at our prompt lengths rather than trusting the auto heuristic.
+      - { label: fa-off, variant: q4_0, flash_attn: "off" }
+      - { label: fa-on, variant: q4_0, flash_attn: "on" }
+
+  build-flags:
+    description: "Compiler targeting: default build vs -mcpu=native (the official AWS/Arm recipe)."
+    model: qwen2.5-0.5b-instruct
+    workload: rag-context
+    configs:
+      # -mcpu=native unlocks SVE/i8mm (MMLA) code paths on Graviton3/4; it is the exact build
+      # both aws-graviton-getting-started and learn.arm.com prescribe. (GGML_SVE was removed
+      # upstream — cross-compilers use -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv9-a+i8mm+dotprod.)
+      - { label: default-build, variant: q4_0, bin: "${LLAMA_BASELINE_BIN}" }
+      - { label: mcpu-native, variant: q4_0, bin: "${LLAMA_MCPU_BIN}" }
+
+  kleidiai:
+    description: "KleidiAI ON vs OFF on the same Q4_0 model (two llama.cpp builds)."
+    model: qwen2.5-0.5b-instruct             # official q4_0 (verified 2026-07-07)
+    workload: rag-context
+    configs:
+      # Point these at two builds: a baseline build and one built with -DGGML_CPU_KLEIDIAI=ON.
+      # The harness PROVES which build has KleidiAI active (CPU_KLEIDIAI load-log detection)
+      # and records it in the report's `kleidiai` column.
+      - { label: baseline, variant: q4_0, bin: "${LLAMA_BASELINE_BIN}" }
+      - { label: kleidiai, variant: q4_0, bin: "${LLAMA_KLEIDIAI_BIN}" }

@@ -9,7 +9,7 @@ FF     ?= $(PYTHON) -m firstflight
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup setup-engine smoke ttft throughput info download bench profile report report-demo test lint format clean
+.PHONY: help setup setup-engine smoke ttft throughput info download bench profile experiment report report-demo test lint format clean
 
 help:  ## Show this help
 	@echo "Arm FirstFlight — targets:"
@@ -22,6 +22,7 @@ help:  ## Show this help
 	@echo "  ttft      MEASURED TTFT + prompt-cache demo (llama-server timings)"
 	@echo "  throughput  Concurrency sweep: tok/s at 1/2/4/8 parallel requests"
 	@echo "  profile   Profile with Arm Performix (apx)                (no-op off Arm)"
+	@echo "  experiment  Before/after axis: quant/threads/pinning/KleidiAI + quality eval"
 	@echo "  report    Render the before/after markdown + HTML report from bench/results"
 	@echo "  report-demo  Render a synthetic DEMO report (no Arm box needed)"
 	@echo "  test      Run unit tests (pytest)"
@@ -55,6 +56,9 @@ throughput:  ## Concurrency sweep via llama-batched-bench
 
 profile:  ## Arm Performix profile
 	$(FF) profile
+
+experiment:  ## Before/after optimization experiment + quality eval
+	$(FF) experiment
 
 report:  ## Render the before/after report from bench/results
 	$(FF) report

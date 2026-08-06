@@ -48,6 +48,14 @@ def test_throughput_skips_without_binary(monkeypatch):
     assert "llama-batched-bench" in res.output
 
 
+def test_experiment_skips_without_binary(monkeypatch):
+    monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+    res = CliRunner().invoke(main, ["experiment", "--no-download", "--no-report"])
+    assert res.exit_code == 0
+    assert "skip" in res.output.lower() or "no configs" in res.output.lower()
+
+
 def test_profile_noop_off_arm():
     # On a non-Arm-Linux machine, profile no-ops cleanly (exit 0) with a clear reason.
     res = CliRunner().invoke(main, ["profile"])

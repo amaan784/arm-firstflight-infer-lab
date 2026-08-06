@@ -1,7 +1,8 @@
 """`firstflight` command-line entrypoint.
 
 Subcommands: setup-engine · info · smoke · download · run · bench · ttft · throughput ·
-profile · experiment · report. All no-op gracefully off Arm / without a llama.cpp build.
+profile · experiment · report · autotune. All are functional; `autotune` is a strictly opt-in
+stretch goal (pass --enable). Everything no-ops gracefully off Arm / without a llama.cpp build.
 """
 
 from __future__ import annotations
@@ -348,6 +349,53 @@ def report(results_source, instance_name, out_dir, demo) -> None:
             instance_name=instance_name,
             out_dir=out_dir,
             demo=demo,
+        )
+    )
+
+
+@main.command()
+@click.option("--enable", is_flag=True, help="Opt in to the agentic optimizer (required to run).")
+@click.option(
+    "--llm", is_flag=True, help="Use the Claude proposer ([agent] extra + ANTHROPIC_API_KEY)."
+)
+@click.option("--model", "model_id", default=None, help="Model id (default: smoke model).")
+@click.option(
+    "--target-context",
+    type=int,
+    default=2048,
+    show_default=True,
+    help="Context to optimize prefill for.",
+)
+@click.option("--max-iters", type=int, default=12, show_default=True, help="Max trials.")
+@click.option(
+    "--patience", type=int, default=3, show_default=True, help="Stop after N non-improving trials."
+)
+@click.option("--no-download", is_flag=True, help="Require models cached; don't download.")
+@click.option("--no-profile", is_flag=True, help="Skip the Performix profiling step.")
+def autotune(
+    enable, llm, model_id, target_context, max_iters, patience, no_download, no_profile
+) -> None:
+    """Agent-in-the-loop optimizer (stretch). Strictly opt-in: pass --enable to run."""
+    if not enable:
+        console.print(
+            "[yellow]autotune is opt-in[/] - pass [bold]--enable[/] to run it (stretch goal)."
+        )
+        console.print(
+            "[dim]It loops: propose config -> benchmark -> repeat until no improvement. "
+            "Default proposer is a heuristic grid (no API key); --llm uses Claude.[/]"
+        )
+        sys.exit(0)
+    from .runner import autotune as run_autotune
+
+    sys.exit(
+        run_autotune(
+            model_id=model_id,
+            use_llm=llm,
+            max_iters=max_iters,
+            patience=patience,
+            target_context=target_context,
+            download=not no_download,
+            do_profile=not no_profile,
         )
     )
 

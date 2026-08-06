@@ -631,3 +631,142 @@ def experiment(
         console.print("Rendering report...")
         return report(instance_name=instance_name)
     return 0
+
+
+def autotune(
+    *,
+    model_id: str | None = None,
+    use_llm: bool = False,
+    max_iters: int = 12,
+    patience: int = 3,
+    target_context: int = 2048,
+    download: bool = True,
+    do_profile: bool = True,
+) -> int:
+    """Agent-in-the-loop optimizer: propose -> benchmark -> loop until no improvement.
+
+    Strictly opt-in (the CLI gates this behind --enable). Degrades gracefully: no binary -> skip.
+    """
+    import json
+    import os
+    from datetime import UTC, datetime
+
+    from .autotune import agent
+    from .profile.performix import PerformixProfiler
+
+    console.rule("[bold]firstflight autotune[/]")
+    models = load_models()
+    spec, _ = _resolve_model(models, model_id, None)
+    variants = list(spec.variants.keys())
+    if not variants:
+        console.print(f"[yellow]No variants for {spec.id}.[/]")
+        return 0
+
+    cpu = os.cpu_count() or 4
+    thread_options = sorted({t for t in (2, 4, 8, cpu) if 1 <= t <= cpu}) or [cpu]
+
+    bench_bin = llama_cpp.find_binary("bench")
+    if bench_bin is None:
+        return _skip("no llama.cpp `llama-bench` binary to autotune.")
+
+    hotspots: list = []
+    if do_profile:
+        prof = PerformixProfiler()
+        if prof.available():
+            try:
+                mv0 = spec.variant(variants[0])
+                mp0 = ensure_model(spec, mv0) if download else model_dir() / mv0.file
+                target = prefill.build_llama_bench_command(
+                    bench_bin, mp0, [target_context], [0], None, 1, "json"
+                )
+                pres = prof.profile(target)
+                if not pres.skipped:
+                    hotspots = [
+                        {"function": h.function, "percent": h.percent} for h in pres.hotspots
+                    ]
+            except Exception:  # noqa: BLE001 - profiling is best-effort
+                hotspots = []
+
+    state = agent.AutotuneState(model_id=spec.id, target_context=target_context, hotspots=hotspots)
+    proposer = (
+        agent.LLMProposer(variants, thread_options)
+        if use_llm
+        else agent.HeuristicProposer(variants, thread_options)
+    )
+
+    def benchmark_fn(cfg: agent.TuneConfig) -> agent.TuneTrial:
+        try:
+            mv = spec.variant(cfg.variant)
+            model_path = ensure_model(spec, mv) if download else model_dir() / mv.file
+            sweep = prefill.run_sweep(
+                bench_bin=bench_bin,
+                model_path=model_path,
+                model_id=spec.id,
+                variant=cfg.variant,
+                workload_name="autotune",
+                prompt_lengths=[target_context],
+                n_gen=0,
+                threads=cfg.threads,
+                repetitions=3,
+                label=cfg.label(),
+                cpu_mask=cfg.cpu_mask,
+            )
+            pt = next((p for p in sweep.prefill_points if p.n_prompt == target_context), None)
+            score = pt.throughput_tok_s if pt else 0.0
+            console.print(f"  {cfg.label()}: [bold]{score:.1f}[/] tok/s")
+            return agent.TuneTrial(
+                config=cfg, score=score, detail={"ttft_s": pt.ttft_s if pt else None}
+            )
+        except Exception as exc:  # noqa: BLE001 - a bad config scores 0, loop continues
+            console.print(f"  {cfg.label()}: [red]failed[/] ({safe(str(exc))})")
+            return agent.TuneTrial(config=cfg, score=0.0, detail={"error": str(exc)})
+
+    proposer_name = "LLM (Claude)" if use_llm else "heuristic grid"
+    console.print(
+        f"Tuning [bold]{spec.id}[/] | variants={variants} | threads={thread_options} | "
+        f"target={target_context} tok | proposer={proposer_name}"
+    )
+    state = agent.optimize(
+        proposer, benchmark_fn, initial_state=state, max_iters=max_iters, patience=patience
+    )
+
+    best = state.best()
+    if best is None:
+        console.print("[yellow]No trials ran.[/]")
+        return 0
+
+    from rich.table import Table
+
+    table = Table(title="autotune trajectory", title_style="bold")
+    table.add_column("config", style="cyan")
+    table.add_column("prefill tok/s", justify="right")
+    for t in state.history:
+        marker = "  <- best" if t is best else ""
+        table.add_row(t.config.label(), f"{t.score:.1f}{marker}")
+    console.print(table)
+    console.print(f"\n[green]Best:[/] {best.config.label()} @ [bold]{best.score:.1f}[/] tok/s")
+
+    out = results_dir() / f"autotune_{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.json"
+    payload = {
+        "model": spec.id,
+        "target_context": target_context,
+        "metric": state.metric,
+        "proposer": proposer_name,
+        "best": {
+            "variant": best.config.variant,
+            "threads": best.config.threads,
+            "score": best.score,
+        },
+        "trials": [
+            {
+                "label": t.config.label(),
+                "variant": t.config.variant,
+                "threads": t.config.threads,
+                "score": t.score,
+            }
+            for t in state.history
+        ],
+    }
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    console.print(f"[green]OK[/] wrote {out}")
+    return 0

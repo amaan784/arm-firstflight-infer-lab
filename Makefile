@@ -9,7 +9,7 @@ FF     ?= $(PYTHON) -m firstflight
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup setup-engine smoke ttft throughput info download bench profile experiment report report-demo test lint format clean
+.PHONY: help setup setup-engine smoke ttft throughput info download bench profile experiment report report-demo autotune test lint format clean
 
 help:  ## Show this help
 	@echo "Arm FirstFlight — targets:"
@@ -25,6 +25,7 @@ help:  ## Show this help
 	@echo "  experiment  Before/after axis: quant/threads/pinning/KleidiAI + quality eval"
 	@echo "  report    Render the before/after markdown + HTML report from bench/results"
 	@echo "  report-demo  Render a synthetic DEMO report (no Arm box needed)"
+	@echo "  autotune  Agent-in-the-loop optimizer (stretch; needs --enable)"
 	@echo "  test      Run unit tests (pytest)"
 	@echo "  lint      Lint with ruff"
 	@echo "  format    Auto-format with ruff"
@@ -65,6 +66,9 @@ report:  ## Render the before/after report from bench/results
 
 report-demo:  ## Render a synthetic DEMO report (no Arm box needed)
 	$(FF) report --demo
+
+autotune:  ## Agentic autotuner (running the target IS the opt-in)
+	$(FF) autotune --enable
 
 test:  ## Unit tests
 	$(PYTHON) -m pytest

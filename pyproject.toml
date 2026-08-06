@@ -39,6 +39,8 @@ report = ["matplotlib==3.11.0", "jinja2==3.1.6"]
 hub = ["huggingface-hub==1.21.0"]
 # Quality eval. The light path needs no torch: `pip install 'lm-eval[api]'`.
 eval = ["lm-eval==0.4.12"]
+# Optional LLM proposer for the autotuner. Lazy-imported; core ships without it.
+agent = ["anthropic>=0.40"]
 # Lint + test.
 dev = ["ruff==0.15.20", "pytest==9.1.1"]
 # Convenience: everything except the heavy eval extra.

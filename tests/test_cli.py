@@ -48,6 +48,20 @@ def test_throughput_skips_without_binary(monkeypatch):
     assert "llama-batched-bench" in res.output
 
 
+def test_autotune_is_opt_in():
+    res = CliRunner().invoke(main, ["autotune"])
+    assert res.exit_code == 0
+    assert "opt-in" in res.output.lower()
+
+
+def test_autotune_enable_skips_without_binary(monkeypatch):
+    monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+    res = CliRunner().invoke(main, ["autotune", "--enable", "--no-download", "--no-profile"])
+    assert res.exit_code == 0
+    assert "skip" in res.output.lower()
+
+
 def test_experiment_skips_without_binary(monkeypatch):
     monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
     monkeypatch.setenv("PATH", "")

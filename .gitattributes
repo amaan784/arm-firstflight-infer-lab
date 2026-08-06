@@ -1,2 +1,14 @@
-# Auto detect text files and perform LF normalization
+# Normalize text files; pin LF where Linux execution depends on it.
 * text=auto
+
+# Shell scripts run on Arm Linux boxes/runners — CRLF would break them ("\r: command not found").
+*.sh text eol=lf
+
+# YAML/workflows and Python are safest as LF everywhere.
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+
+# Binary assets.
+*.png binary
+*.gguf binary

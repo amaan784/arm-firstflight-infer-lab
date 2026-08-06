@@ -10,6 +10,7 @@ without `apx` it no-ops cleanly.
 ## Install & run (any machine)
 ```bash
 python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
+# or conda: conda create -n <env-name> python=3.12 -y && conda activate <env-name>
 pip install -e ".[report,dev]"
 firstflight profile              # no-op off Arm; runs apx on an Arm box
 firstflight report --demo        # report now includes a hotspots section

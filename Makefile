@@ -1,8 +1,8 @@
 # Arm FirstFlight — Inference Optimization Lab
 # One-command story on an Arm box:  make bench && make report
 #
-# Targets call the `firstflight` console script. If it is not on PATH, they fall back to
-# `python -m firstflight`. Override the interpreter with `make PYTHON=python3.11 ...`.
+# Targets invoke the CLI as `python -m firstflight` (equivalent to the `firstflight`
+# console script). Override with `make PYTHON=python3.11 ...` or `make FF=firstflight ...`.
 
 PYTHON ?= python
 FF     ?= $(PYTHON) -m firstflight

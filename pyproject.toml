@@ -33,10 +33,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Report generation (Phase 2). Heavier; pulls numpy/pillow via matplotlib.
+# Report generation. Heavier; pulls numpy/pillow via matplotlib.
 report = ["matplotlib==3.11.0", "jinja2==3.1.6"]
-# Optional interactive charts.
-viz = ["plotly==6.8.0"]
 # Faster/auth'd model downloads (otherwise we stream the resolve URL via requests).
 hub = ["huggingface-hub==1.21.0"]
 # Lint + test.
@@ -45,7 +43,6 @@ dev = ["ruff==0.15.20", "pytest==9.1.1"]
 all = [
     "matplotlib==3.11.0",
     "jinja2==3.1.6",
-    "plotly==6.8.0",
     "huggingface-hub==1.21.0",
     "ruff==0.15.20",
     "pytest==9.1.1",

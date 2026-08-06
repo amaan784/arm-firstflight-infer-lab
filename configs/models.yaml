@@ -11,10 +11,11 @@
 # ALL-LOWERCASE filenames (q4_k_m, q8_0, fp16) and the resolve URLs return real binaries.
 #
 # ---------------------------------------------------------------------------------------
-# KleidiAI NOTE (matters for Phase 4): Arm's KleidiAI int4/int8 microkernels in current
-# llama.cpp accelerate ONLY Q4_0 and Q8_0 weights (one-time repack at load) — NOT Q4_K_M
-# / k-quants. So the "KleidiAI on vs off" comparison must use a **Q4_0** model. bartowski
-# additionally ships Arm-packed quants (Q4_0_4_4 / Q4_0_4_8 / Q4_0_8_8). See METHODOLOGY.md.
+# KleidiAI NOTE (matters for the kleidiai/quant experiments): Arm's KleidiAI int4/int8
+# microkernels in current llama.cpp accelerate ONLY Q4_0 and Q8_0 weights — NOT Q4_K_M /
+# k-quants. The acceleration repacks plain Q4_0/Q8_0 tensors at load time (the old on-disk
+# Q4_0_4_4 / Q4_0_4_8 / Q4_0_8_8 formats were removed upstream and no longer load).
+# So the "KleidiAI on vs off" comparison must use a **Q4_0** model. See METHODOLOGY.md.
 #   Verify KleidiAI is active by looking for this line in llama.cpp load output:
 #     load_tensors: CPU_KLEIDIAI model buffer size = ... MiB
 # ---------------------------------------------------------------------------------------
@@ -40,8 +41,8 @@ models:
         url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf"  # verified 2026-06-26
         sha256: ""
 
-  # bartowski variant of the same 0.5B model — adds a Q4_0 quant (the KleidiAI-accelerated
-  # path) plus Arm-packed Q4_0_4_4 / Q4_0_4_8 / Q4_0_8_8 for the Phase 4 KleidiAI experiment.
+  # bartowski variant of the same 0.5B model — an alternative source for the Q4_0 quant
+  # (the KleidiAI-accelerated path) used by the kleidiai experiment.
   qwen2.5-0.5b-instruct-bartowski:
     hf_repo: bartowski/Qwen2.5-0.5B-Instruct-GGUF
     description: "Qwen2.5 0.5B Instruct (bartowski) — provides the Q4_0 KleidiAI path."

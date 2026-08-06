@@ -1,2 +1,3 @@
-# Structured benchmark results (JSON) are written here by `firstflight bench` (Phase 1).
-# A sample result is committed in Phase 6 so the repo looks complete before anyone runs it.
+# Structured benchmark results (JSON) are written here by `firstflight bench`.
+# Clearly-synthetic samples (example_*.json) are committed so the repo looks complete
+# before anyone runs it; real runs exclude them automatically.

@@ -32,7 +32,7 @@ instances:
     arch: arm64
     cpu: "Ampere Altra (Arm Neoverse-N1)"
     vcpus: 2   # OCPUs
-    usd_per_hour: 0.023    # 2 OCPU x $0.01 + 12 GB x $0.0015 ~= $0.038/hr list; $0 within Always Free
+    usd_per_hour: 0.038    # 2 OCPU x $0.01 + 12 GB x $0.0015 = $0.038/hr list; $0 within Always Free
     notes: >-
       Oracle Always Free now covers 1,500 OCPU-hrs + 9,000 GB-hrs/month (~2 OCPUs/12GB 24/7,
       per docs checked 2026-07-05 — the old 4 OCPU/24GB figure is stale). List price

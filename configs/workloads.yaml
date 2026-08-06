@@ -10,7 +10,7 @@ workloads:
     prompt_lengths: [128, 512, 2048, 8192, 16384, 32768]
     gen_lengths: [32]
     repeats: 5          # timed repeats per point (variance)
-    warmup: 1           # warm-up runs discarded
+    warmup: 1           # informational — llama-bench's own warm-up (on by default) applies
 
   quick-smoke:
     description: "Tiny end-to-end sanity check (any machine)."

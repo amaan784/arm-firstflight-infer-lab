@@ -1,7 +1,7 @@
 """`firstflight` command-line entrypoint.
 
 Subcommands: setup-engine · info · smoke · download · run · bench · ttft · throughput ·
-profile · report. All no-op gracefully off Arm / without a llama.cpp build.
+profile · experiment · report. All no-op gracefully off Arm / without a llama.cpp build.
 """
 
 from __future__ import annotations
@@ -285,6 +285,29 @@ def profile(prompt_len, model_id, variant, threads, no_download) -> None:
             prompt_len=prompt_len,
             threads=threads,
             download=not no_download,
+        )
+    )
+
+
+@main.command()
+@click.option(
+    "--name", default=None, help="Experiment from experiments.yaml (default: its default)."
+)
+@click.option("--no-quality", is_flag=True, help="Skip the quality probe.")
+@click.option("--no-download", is_flag=True, help="Require models cached; don't download.")
+@click.option("--no-report", is_flag=True, help="Don't render the report afterwards.")
+@click.option("--instance", "instance_name", default=None, help="Instance for the $/M-token cost.")
+def experiment(name, no_quality, no_download, no_report, instance_name) -> None:
+    """Run a before/after optimization experiment (quant/threads/pinning/KleidiAI) + quality."""
+    from .runner import experiment as run_exp
+
+    sys.exit(
+        run_exp(
+            name=name,
+            quality=not no_quality,
+            download=not no_download,
+            render=not no_report,
+            instance_name=instance_name,
         )
     )
 

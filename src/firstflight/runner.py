@@ -495,3 +495,139 @@ def profile(
     console.print(table)
     console.print(f"\n[green]OK[/] wrote {out}")
     return 0
+
+
+def experiment(
+    *,
+    name: str | None = None,
+    quality: bool = True,
+    download: bool = True,
+    render: bool = True,
+    instance_name: str | None = None,
+) -> int:
+    """Run a before/after experiment: bench + quality-eval each config, holding model fixed.
+
+    Each config becomes a labelled SweepResult in bench/results/*.json; the report then shows
+    the speed delta AND the quality delta. Configs whose binary/model are missing are skipped
+    with a message (so it degrades gracefully off the bench box).
+    """
+    from .config import load_experiments
+    from .eval import quality as qmod
+
+    console.rule("[bold]firstflight experiment[/]")
+    spec = load_experiments().get(name)
+    models = load_models()
+    wl = load_workloads().get(spec.workload)
+    console.print(f"Experiment: [bold]{spec.name}[/] - {spec.description}")
+    console.print(f"Workload: {wl.name}   configs: {len(spec.configs)}   quality: {quality}")
+
+    written: list = []
+    for cfg in spec.configs:
+        model_id = cfg.model_id or spec.model
+        try:
+            mspec = models.get(model_id)
+            mv = mspec.variant(cfg.variant)
+        except KeyError as exc:
+            console.print(f"[yellow]skip {cfg.label}:[/] {safe(str(exc))}")
+            continue
+
+        if cfg.bin and "${" in cfg.bin:
+            # os.path.expandvars leaves ${VAR} untouched when the env var is unset.
+            console.print(
+                f"[yellow]skip {cfg.label}:[/] env var not set for bin override "
+                f"({safe(cfg.bin)}) - export it or edit experiments.yaml."
+            )
+            continue
+
+        bench_bin = llama_cpp.find_binary("bench", env_value=cfg.bin or None)
+        if bench_bin is None:
+            where = f" at {cfg.bin}" if cfg.bin else ""
+            console.print(f"[yellow]skip {cfg.label}:[/] no llama-bench binary{safe(where)}.")
+            continue
+
+        if download:
+            try:
+                model_path = ensure_model(mspec, mv)
+            except Exception as exc:
+                console.print(f"[red]{cfg.label} download failed:[/] {safe(str(exc))}")
+                continue
+        else:
+            model_path = model_dir() / mv.file
+            if not model_path.exists():
+                console.print(f"[yellow]skip {cfg.label}:[/] model not cached.")
+                continue
+
+        pin = f", mask={cfg.cpu_mask}" if cfg.cpu_mask else ""
+        if cfg.cache_type_k or cfg.cache_type_v:
+            pin += f", kv={cfg.cache_type_k or 'f16'}/{cfg.cache_type_v or 'f16'}"
+        if cfg.ubatch_size:
+            pin += f", ub={cfg.ubatch_size}"
+        if cfg.flash_attn:
+            pin += f", fa={cfg.flash_attn}"
+        console.print(
+            f"\n[bold]> {cfg.label}[/]  {model_id}:{cfg.variant}  "
+            f"threads={cfg.threads or 'auto'}{pin}"
+        )
+        try:
+            sweep = prefill.run_sweep(
+                bench_bin=bench_bin,
+                model_path=model_path,
+                model_id=model_id,
+                variant=cfg.variant,
+                workload_name=wl.name,
+                prompt_lengths=wl.prompt_lengths,
+                n_gen=cfg.gen
+                if cfg.gen is not None
+                else (wl.gen_lengths[0] if wl.gen_lengths else 32),
+                threads=cfg.threads,
+                repetitions=wl.repeats,
+                label=cfg.label,
+                cpu_mask=cfg.cpu_mask,
+                cpu_strict=cfg.cpu_strict,
+                cache_type_k=cfg.cache_type_k,
+                cache_type_v=cfg.cache_type_v,
+                ubatch_size=cfg.ubatch_size,
+                flash_attn=cfg.flash_attn,
+            )
+        except prefill.BenchError as exc:
+            console.print(f"[red]{cfg.label} bench failed:[/] {safe(str(exc))}")
+            continue
+
+        sweep.experiment = spec.name  # tag so combined reports can group by experiment
+
+        cli_bin = llama_cpp.find_binary("cli", env_value=cfg.bin or None)
+
+        # Prove (don't assume) whether KleidiAI kernels are active for this binary+model.
+        if cli_bin is not None:
+            active = llama_cpp.detect_kleidiai(cli_bin, model_path, threads=cfg.threads)
+            sweep.host.kleidiai = active
+            if active is not None:
+                console.print(f"  kleidiai active: {'yes' if active else 'no'}")
+
+        if quality:
+            if cli_bin is not None:
+                qr = qmod.run_probe(cli_bin, model_path, threads=cfg.threads)
+                sweep.quality = {
+                    "method": qr.method,
+                    "accuracy": qr.accuracy,
+                    "n_correct": qr.n_correct,
+                    "n_total": qr.n_total,
+                }
+                console.print(f"  quality: {qr.n_correct}/{qr.n_total} = {qr.accuracy:.0%}")
+            else:
+                console.print("  [dim]quality skipped: no llama-cli binary[/]")
+
+        out = results_dir() / result_filename(model_id, cfg.variant, cfg.label, sweep.timestamp)
+        sweep.save_json(out)
+        written.append(out)
+        console.print(f"  [green]OK[/] wrote {out.name}")
+
+    if not written:
+        console.print("\n[yellow]No configs ran[/] (binaries/models missing) - see messages above.")
+        return 0
+
+    console.print(f"\n[green]OK[/] {len(written)} result(s) in bench/results/")
+    if render:
+        console.print("Rendering report...")
+        return report(instance_name=instance_name)
+    return 0

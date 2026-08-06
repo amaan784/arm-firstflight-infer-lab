@@ -6,6 +6,7 @@ schema dependency.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -189,4 +190,82 @@ def load_workloads(path: Path | None = None) -> WorkloadsConfig:
     return WorkloadsConfig(
         default_workload=str(data.get("default_workload", "")),
         workloads=workloads,
+    )
+
+
+# --- experiments (before/after optimization axes) ------------------------------
+
+
+@dataclass(frozen=True)
+class ExperimentConfig:
+    """One point on the before/after axis (a labelled config to benchmark)."""
+
+    label: str
+    variant: str
+    model_id: str = ""  # falls back to the experiment's `model`
+    threads: int | None = None
+    cpu_mask: str = ""  # hex CPU mask for llama-bench -C (pinning); "" = none
+    cpu_strict: bool = False
+    bin: str = ""  # optional llama.cpp binary/dir override (e.g. a KleidiAI build); env-expanded
+    gen: int | None = None
+    cache_type_k: str = ""  # KV-cache K type for llama-bench -ctk (e.g. "q8_0"); "" = default f16
+    cache_type_v: str = ""  # KV-cache V type for llama-bench -ctv
+    ubatch_size: int | None = None  # llama-bench -ub: prefill micro-batch (default 512)
+    flash_attn: str = ""  # llama-bench -fa: "on"/"off"/"auto"; "" = binary default (auto)
+
+
+@dataclass(frozen=True)
+class ExperimentSpec:
+    name: str
+    description: str
+    model: str  # default model id for configs that don't override it
+    workload: str
+    configs: list[ExperimentConfig]
+
+
+@dataclass(frozen=True)
+class ExperimentsConfig:
+    default_experiment: str
+    experiments: dict[str, ExperimentSpec]
+
+    def get(self, name: str | None = None) -> ExperimentSpec:
+        name = name or self.default_experiment
+        if name not in self.experiments:
+            raise KeyError(
+                f"Unknown experiment '{name}'. Known: {', '.join(self.experiments) or '(none)'}"
+            )
+        return self.experiments[name]
+
+
+def load_experiments(path: Path | None = None) -> ExperimentsConfig:
+    data = load_yaml(path or config_dir() / "experiments.yaml")
+    experiments: dict[str, ExperimentSpec] = {}
+    for name, raw in (data.get("experiments") or {}).items():
+        configs = [
+            ExperimentConfig(
+                label=str(c.get("label", "")),
+                variant=str(c.get("variant", "")),
+                model_id=str(c.get("model", c.get("model_id", "")) or ""),
+                threads=int(c["threads"]) if c.get("threads") is not None else None,
+                cpu_mask=os.path.expandvars(str(c.get("cpu_mask", "") or "")),
+                cpu_strict=bool(c.get("cpu_strict", False)),
+                bin=os.path.expandvars(str(c.get("bin", "") or "")),
+                gen=int(c["gen"]) if c.get("gen") is not None else None,
+                cache_type_k=str(c.get("cache_type_k", "") or ""),
+                cache_type_v=str(c.get("cache_type_v", "") or ""),
+                ubatch_size=int(c["ubatch_size"]) if c.get("ubatch_size") is not None else None,
+                flash_attn=str(c.get("flash_attn", "") or ""),
+            )
+            for c in (raw.get("configs") or [])
+        ]
+        experiments[name] = ExperimentSpec(
+            name=name,
+            description=str(raw.get("description", "")),
+            model=str(raw.get("model", "")),
+            workload=str(raw.get("workload", "")),
+            configs=configs,
+        )
+    return ExperimentsConfig(
+        default_experiment=str(data.get("default_experiment", "")),
+        experiments=experiments,
     )

@@ -1,8 +1,8 @@
 """Throughput -> cost. Turns tokens/sec + $/hour into $ per million tokens.
 
-The only external input is the instance hourly price (configs/instances.yaml), which is
-region/time dependent and therefore left as a TODO(confirm) placeholder until you provide
-the live price for the box you benchmark on.
+The only external input is the instance hourly price (configs/instances.yaml) — real
+published on-demand prices with verification dates; re-check for your region/instance on
+the day you benchmark, since prices float.
 """
 
 from __future__ import annotations

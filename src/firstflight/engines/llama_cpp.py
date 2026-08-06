@@ -1,8 +1,8 @@
 """llama.cpp engine adapter.
 
-Phase 0 implements binary discovery + a single generation run (`run_once`) for the smoke
-test. The prefill/TTFT benchmark sweep via `llama-bench` lives in `firstflight.bench.prefill`
-(Phase 1) and reuses `find_binary("bench")` from here.
+Implements binary discovery + a single generation run (`run_once`) for the smoke test.
+The prefill/TTFT benchmark sweep via `llama-bench` lives in `firstflight.bench.prefill`
+and reuses `find_binary("bench")` from here.
 
 Upstream: https://github.com/ggml-org/llama.cpp  (org is now `ggml-org`, formerly `ggerganov`)
 Verified flags (2026-06-26): llama-bench prefill=`-p/--n-prompt`, gen=`-n/--n-gen`,

@@ -10,7 +10,7 @@ llama-bench flags (verified 2026-06-26):
   -t/--threads  <n[,n...]>   threads
   -r/--repetitions <n>       repeats per config
   -o/--output   <csv|json|jsonl|md|sql>   results format          [default md]
-  -C/--cpu-mask <hex> + --cpu-strict <0|1>  CPU affinity / pinning  (Phase 4)
+  -C/--cpu-mask <hex> + --cpu-strict <0|1>  CPU affinity / pinning  (pinning experiment)
   -ctk/--cache-type-k <t> + -ctv/--cache-type-v <t>  KV-cache types [default f16]
   -ub/--ubatch-size <n>                    physical micro-batch     [default 512]
   -fa/--flash-attn <on|off|auto>           flash attention          [default auto]
@@ -33,7 +33,7 @@ from ..util import is_arm_linux, machine
 from .memory import run_with_peak_rss
 from .result import BenchPoint, EngineInfo, HostInfo, ModelInfo, SweepResult
 
-# --- llama-bench JSON field names (verified Phase 1; centralized for easy correction) ------
+# --- llama-bench JSON field names (verified vs real b9873; centralized for correction) -----
 # Source: tools/llama-bench/llama-bench.cpp (json printer) + tools/llama-bench/README.md
 F_AVG_TS = "avg_ts"  # average tokens/sec
 F_STD_TS = "stddev_ts"  # stddev of tokens/sec across repetitions

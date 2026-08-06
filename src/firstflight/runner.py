@@ -1,7 +1,7 @@
 """Top-level orchestration.
 
 `smoke()` is the end-to-end sanity check that proves the pipeline on any machine.
-`bench()` runs the prefill/TTFT sweep (Phase 1) via `firstflight.bench.prefill`, writes a
+`bench()` runs the prefill/TTFT sweep via `firstflight.bench.prefill`, writes a
 structured JSON result, and prints a summary. Both degrade gracefully (clean skip) when no
 llama.cpp binary is present.
 """

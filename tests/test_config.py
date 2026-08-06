@@ -14,7 +14,7 @@ def test_instances_load_default():
     instances = config.load_instances()
     inst = instances.get()  # default
     assert inst.arch == "arm64"
-    assert inst.usd_per_hour >= 0.0  # placeholders until confirmed
+    assert inst.usd_per_hour >= 0.0  # schema sanity; real dated prices live in instances.yaml
 
 
 def test_workloads_prefill_scaling():

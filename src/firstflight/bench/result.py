@@ -1,7 +1,7 @@
 """Structured benchmark result schema + JSON (de)serialization.
 
 A `SweepResult` is the unit written to `bench/results/*.json` and read by the report
-generator (Phase 2). It is intentionally self-describing (schema_version, host, engine,
+generator. It is intentionally self-describing (schema_version, host, engine,
 model, config) so a committed result is fully interpretable without rerunning anything.
 """
 
@@ -36,7 +36,7 @@ class HostInfo:
     cpu_count: int
     is_arm_linux: bool
     cpu_info: str = ""
-    kleidiai: bool | None = None  # detected KleidiAI-active (Phase 4); None until known
+    kleidiai: bool | None = None  # detected KleidiAI-active (experiments); None until known
     thp: str = ""  # Linux transparent-hugepage mode captured at run time ("" off-Linux)
 
 
@@ -60,7 +60,7 @@ class ModelInfo:
 
 @dataclass
 class SweepResult:
-    label: str  # "baseline" / "optimized" / free-form, for before-vs-after (Phase 4)
+    label: str  # "baseline" / "optimized" / free-form, for before-vs-after experiments
     timestamp: str  # ISO-8601 UTC
     workload: str
     host: HostInfo
@@ -71,7 +71,7 @@ class SweepResult:
     n_gen: int
     peak_rss_bytes: int | None
     points: list[BenchPoint] = field(default_factory=list)
-    quality: dict | None = None  # optional quality-eval summary (Phase 4): accuracy, n_correct...
+    quality: dict | None = None  # optional quality-eval summary: accuracy, n_correct...
     experiment: str = ""  # which experiment produced this result ("" = ad-hoc bench/run)
     schema_version: int = SCHEMA_VERSION
     tool: str = "firstflight"

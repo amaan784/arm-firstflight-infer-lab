@@ -1,0 +1,239 @@
+# Free, reproducible Arm execution for judges to inspect straight from CI.
+#
+# Runs on GitHub-hosted Arm runners (ubuntu-24.04-arm — GA & free for public repos, verified
+# 2026-06-26: https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/).
+#
+# Two jobs:
+#   smoke-arm            — every push: real inference + baseline prefill sweep + report.
+#   kleidiai-before-after — the HEADLINE story: builds llama.cpp three ways (baseline,
+#                           -DGGML_CPU_KLEIDIAI=ON, -mcpu=native), runs the experiments with
+#                           quality guardrail + KleidiAI-active detection, renders the report.
+# Both render the report INTO THE RUN SUMMARY (no artifact download needed to see results)
+# and upload the full HTML report + JSON results as an artifact.
+
+name: arm-bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      llama_tag:
+        description: "llama.cpp release tag (b9873 verified 2026-07-05; tags float)"
+        default: "b9873"
+        type: string
+      run_quant_sweep:
+        description: "Also run the Q8_0/Q4_K_M/Q4_0 quant sweep in the kleidiai job"
+        default: true
+        type: boolean
+  push:
+    branches: [main]
+    paths: ["src/**", "configs/**", ".github/workflows/arm-bench.yml"]
+
+permissions:
+  contents: read
+
+env:
+  LLAMA_TAG: ${{ github.event.inputs.llama_tag || 'b9873' }}
+
+jobs:
+  smoke-arm:
+    name: smoke + baseline sweep (prebuilt llama.cpp)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Runtime libs (GNU time gives per-process peak RSS)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgomp1 time libcurl4t64 || sudo apt-get install -y libgomp1 time libcurl4
+
+      - name: Install firstflight
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[report,hub]"
+
+      - name: Fetch prebuilt llama.cpp (our own bootstrap command)
+        run: firstflight setup-engine --tag "$LLAMA_TAG"
+
+      - name: Environment report
+        run: firstflight info
+
+      - name: Remove committed synthetic examples (real runs must stay pure)
+        run: rm -f bench/results/example_*.json bench/results/profile_example.json
+
+      - name: Smoke (real inference on Arm)
+        run: firstflight smoke
+
+      - name: Baseline prefill sweep (light workload — this job runs on every push)
+        run: firstflight bench --label baseline --workload rag-context --repetitions 2
+
+      - name: Render report
+        run: firstflight report
+
+      - name: Publish report to the run summary
+        run: |
+          if compgen -G 'bench/reports/*.md' > /dev/null; then
+            f=$(ls -t bench/reports/*.md | head -1)
+            # strip local-image lines (the summary can't load repo-relative PNGs)
+            grep -v '^!\[' "$f" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "_Charts + standalone HTML report: see this run's artifact._" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No report was generated (all measurement steps skipped?)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results + report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm-smoke-${{ github.run_id }}
+          path: |
+            bench/results/**
+            bench/reports/**
+          if-no-files-found: ignore
+
+  kleidiai-before-after:
+    name: "headline: KleidiAI before/after (three builds, same model, same host)"
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git time libcurl4-openssl-dev
+
+      - name: Cache llama.cpp builds (keyed on tag — skips the triple rebuild on re-dispatch)
+        uses: actions/cache@v4
+        with:
+          path: |
+            llama-baseline
+            llama-kleidiai
+            llama-mcpu
+          key: llama-builds-${{ env.LLAMA_TAG }}-v2
+
+      # NOTE: the ttft/throughput steps need llama-server + llama-batched-bench from the
+      # kleidiai build — they MUST be in the target list or those steps silently skip.
+      - name: Build llama.cpp BASELINE (no KleidiAI)
+        run: |
+          set -euxo pipefail
+          if [ ! -e llama-baseline/build/bin/llama-bench ] || [ ! -e llama-baseline/build/bin/llama-server ]; then
+            rm -rf llama-baseline
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-baseline
+            cmake -S llama-baseline -B llama-baseline/build -DCMAKE_BUILD_TYPE=Release
+            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench
+          else
+            echo "cache hit - reusing llama-baseline build"
+          fi
+
+      - name: Build llama.cpp KLEIDIAI (-DGGML_CPU_KLEIDIAI=ON)
+        run: |
+          set -euxo pipefail
+          if [ ! -e llama-kleidiai/build/bin/llama-bench ] || [ ! -e llama-kleidiai/build/bin/llama-server ] || [ ! -e llama-kleidiai/build/bin/llama-batched-bench ]; then
+            rm -rf llama-kleidiai
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-kleidiai
+            cmake -S llama-kleidiai -B llama-kleidiai/build -DCMAKE_BUILD_TYPE=Release -DGGML_CPU_KLEIDIAI=ON
+            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench
+          else
+            echo "cache hit - reusing llama-kleidiai build"
+          fi
+
+      - name: Build llama.cpp MCPU-NATIVE (-mcpu=native, the official AWS/Arm recipe)
+        run: |
+          set -euxo pipefail
+          if [ ! -e llama-mcpu/build/bin/llama-bench ]; then
+            rm -rf llama-mcpu
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-mcpu
+            cmake -S llama-mcpu -B llama-mcpu/build -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_FLAGS="-mcpu=native" -DCMAKE_CXX_FLAGS="-mcpu=native"
+            cmake --build llama-mcpu/build --config Release -j"$(nproc)" --target llama-bench llama-cli
+          else
+            echo "cache hit - reusing llama-mcpu build"
+          fi
+
+      - name: Install firstflight
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[report,hub]"
+
+      - name: Remove committed synthetic examples (real runs must stay pure)
+        run: rm -f bench/results/example_*.json bench/results/profile_example.json
+
+      - name: "Experiment: build flags — default vs -mcpu=native (official AWS/Arm recipe)"
+        env:
+          LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build
+          LLAMA_MCPU_BIN: ${{ github.workspace }}/llama-mcpu/build
+        run: firstflight experiment --name build-flags --no-report --no-quality
+
+      - name: "Experiment: KleidiAI before/after (+ quality guardrail + active-detection)"
+        env:
+          LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build
+          LLAMA_KLEIDIAI_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight experiment --name kleidiai --no-report
+
+      - name: "Experiment: quant sweep (Q8_0 / Q4_K_M / Q4_0)"
+        if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight experiment --name quant-sweep --no-report
+
+      - name: "Experiment: KV-cache f16 vs q8_0 (-ctk/-ctv, FA pinned on)"
+        if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight experiment --name kv-cache --no-report
+
+      - name: "Experiment: prefill micro-batch sweep (-ub 256..2048)"
+        if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight experiment --name prefill-batch --no-report --no-quality
+
+      - name: "Measured TTFT: prompt-cache cold vs warm (llama-server --cache-reuse)"
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight ttft --prefix-tokens 2048
+
+      - name: "Concurrency: aggregate tok/s at 1/2/4/8 parallel requests"
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight throughput --prompt-tokens 1024 --levels 1,2,4,8
+
+      - name: "Performix hotspots (clean no-op unless apx is installed on the runner)"
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight profile --no-download || true
+
+      - name: Render the combined report
+        run: firstflight report
+
+      - name: Publish report to the run summary
+        run: |
+          if compgen -G 'bench/reports/*.md' > /dev/null; then
+            f=$(ls -t bench/reports/*.md | head -1)
+            grep -v '^!\[' "$f" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "_Charts + standalone HTML report: see this run's artifact._" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No report was generated (all measurement steps skipped?)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results + report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm-headline-${{ github.run_id }}
+          path: |
+            bench/results/**
+            bench/reports/**
+          if-no-files-found: ignore

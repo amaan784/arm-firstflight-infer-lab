@@ -139,6 +139,14 @@ runners are ephemeral, so Performix profiling belongs here rather than in CI. Fi
 
 ## E. Submission checklist
 
+**Accounts (both are listed entry steps in the Official Rules — neither provides compute):**
+- [ ] Devpost account + **Join Hackathon** clicked (this is what makes you able to submit)
+- [ ] Free **Arm Developer Program** account — <https://developer.arm.com/arm-developer-program>
+      (Rules §4 "How To Enter" walks through it: name/company/email/job title → verify email →
+      complete profile. ~2 minutes. It grants docs/labs/support, **not** cloud instances —
+      there is no Arm-provided cloud environment or credits for this challenge.)
+
+**Project:**
 - [ ] Real Arm numbers in the README headline (from the CI artifact or the VM run)
 - [ ] Real report committed in `bench/reports/` (replacing the synthetic, banner-labeled sample)
 - [ ] `configs/instances.yaml` price confirmed for your actual instance/region
@@ -151,6 +159,11 @@ runners are ephemeral, so Performix profiling belongs here rather than in CI. Fi
 - [ ] Repo stays public, free of charge, and the `arm-bench` workflow stays runnable through
       the end of the Judging Period (**Aug 17 – Sep 4, 2026 4:00pm PT**) — don't archive,
       rename, or make it private after submitting
+- [ ] Name the concrete Arm64 silicon + instance you benchmarked on in the write-up (e.g.
+      "GitHub-hosted `ubuntu-24.04-arm` = Azure Cobalt 100 / Neoverse N2, 4 vCPU", or your
+      Graviton instance type) — the rules ask entrants to document their own test environment
+- [ ] Open the Devpost **"Enter a Submission"** form early and check its actual fields — it is
+      login-gated, so nobody can verify from outside whether it asks for anything extra
 - [ ] Remaining `docs/CONFIRM_ON_ARM.md` items resolved or consciously accepted
 
 ## Troubleshooting

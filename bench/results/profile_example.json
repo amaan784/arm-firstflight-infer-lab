@@ -1,0 +1,41 @@
+{
+  "skipped": false,
+  "reason": "",
+  "timestamp": "2026-06-26T12:00:00+00:00",
+  "target": "llama-bench -m qwen2.5-0.5b-instruct-q4_0.gguf -p 2048 -n 0 -r 1 [SYNTHETIC]",
+  "tool": "arm-performix",
+  "recipe": "code_hotspots",
+  "hotspots": [
+    {
+      "function": "kai_matmul_clamp_f32_qai8dxp_qsi4c32p",
+      "percent": 41.7,
+      "module": "libggml-cpu.so"
+    },
+    {
+      "function": "ggml_compute_forward_mul_mat",
+      "percent": 18.3,
+      "module": "libggml-cpu.so"
+    },
+    {
+      "function": "ggml_vec_dot_q8_0_q8_0",
+      "percent": 9.6,
+      "module": "libggml-cpu.so"
+    },
+    {
+      "function": "ggml_compute_forward_soft_max",
+      "percent": 5.1,
+      "module": "libggml-cpu.so"
+    },
+    {
+      "function": "ggml_compute_forward_rope",
+      "percent": 4.2,
+      "module": "libggml-cpu.so"
+    },
+    {
+      "function": "memcpy",
+      "percent": 3.0,
+      "module": "libc.so.6"
+    }
+  ],
+  "raw_output": ""
+}

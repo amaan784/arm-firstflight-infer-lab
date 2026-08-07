@@ -1,0 +1,47 @@
+# Reproducible aarch64 Linux environment: llama.cpp (+KleidiAI) + firstflight.
+# Build on an Arm host (or with buildx --platform linux/arm64):
+#   docker build -f docker/Dockerfile.arm64 -t firstflight:arm64 .
+#   docker run --rm firstflight:arm64 info      # ENTRYPOINT is `firstflight`
+#
+# LLAMA_TAG b9873 verified live 2026-07-05; tags float — bump deliberately.
+
+FROM ubuntu:24.04
+
+ARG LLAMA_TAG=b9873
+ARG WITH_KLEIDIAI=ON
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates \
+        python3 python3-pip python3-venv \
+        libcurl4-openssl-dev time \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- build llama.cpp with KleidiAI (accelerates Q4_0 / Q8_0 weights) ---
+WORKDIR /opt
+RUN git clone --depth 1 --branch "${LLAMA_TAG}" https://github.com/ggml-org/llama.cpp.git \
+    && cd llama.cpp \
+    && cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CPU_KLEIDIAI=${WITH_KLEIDIAI} \
+    && cmake --build build --config Release -j"$(nproc)"
+ENV LLAMA_CPP_BIN=/opt/llama.cpp/build
+
+# TODO(confirm): install Arm Performix (apx) here for in-container profiling.
+#   Install guide: https://learn.arm.com/install-guides/performix/
+#   The `apx` CLI runs recipes (e.g. `apx recipe run code_hotspots --workload=... --json
+#   --target=localhost`); see github.com/arm/mcp for the real command flow. Profiling usually
+#   targets a host over SSH and needs PMU access, so it is left out of the image by default.
+
+# --- install firstflight ---
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY configs ./configs
+RUN pip install --break-system-packages --no-cache-dir -e ".[report,hub]"
+
+# Cache models on a volume to avoid re-downloading between runs.
+ENV FIRSTFLIGHT_MODEL_DIR=/models
+VOLUME ["/models"]
+
+ENTRYPOINT ["firstflight"]
+CMD ["info"]

@@ -1,8 +1,8 @@
-# Arm FirstFlight — Inference Optimization Lab
+# Arm FirstFlight: inference optimization lab.
 # One-command story on an Arm box:  make bench && make report
 #
-# Targets invoke the CLI as `python -m firstflight` (equivalent to the `firstflight`
-# console script). Override with `make PYTHON=python3.11 ...` or `make FF=firstflight ...`.
+# Targets invoke the CLI as `python -m firstflight` (same thing as the `firstflight` console
+# script). Override with `make PYTHON=python3.11 ...` or `make FF=firstflight ...`.
 
 PYTHON ?= python
 FF     ?= $(PYTHON) -m firstflight
@@ -73,8 +73,9 @@ autotune:  ## Agentic autotuner (running the target IS the opt-in)
 test:  ## Unit tests
 	$(PYTHON) -m pytest
 
-lint:  ## Lint with ruff
+lint:  ## Lint with ruff (same two checks CI runs)
 	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
 
 format:  ## Auto-format with ruff
 	$(PYTHON) -m ruff format .

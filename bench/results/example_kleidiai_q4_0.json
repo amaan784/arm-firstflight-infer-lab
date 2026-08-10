@@ -9,7 +9,10 @@
     "is_arm_linux": true,
     "cpu_info": "Arm Neoverse-V2 (Graviton4) [SYNTHETIC]",
     "kleidiai": true,
-    "thp": ""
+    "thp": "",
+    "system_info": "",
+    "kernel_buffer": "",
+    "cpu_features": ""
   },
   "engine": {
     "name": "llama.cpp",
@@ -37,7 +40,8 @@
       "throughput_tok_s": 2150.0,
       "throughput_stddev": 32.25,
       "ttft_s": 0.059534883720930236,
-      "threads": 8
+      "threads": 8,
+      "samples_ts": []
     },
     {
       "kind": "pp",
@@ -46,7 +50,8 @@
       "throughput_tok_s": 2080.0,
       "throughput_stddev": 31.2,
       "ttft_s": 0.24615384615384617,
-      "threads": 8
+      "threads": 8,
+      "samples_ts": []
     },
     {
       "kind": "pp",
@@ -55,7 +60,8 @@
       "throughput_tok_s": 1850.0,
       "throughput_stddev": 27.75,
       "ttft_s": 1.107027027027027,
-      "threads": 8
+      "threads": 8,
+      "samples_ts": []
     },
     {
       "kind": "pp",
@@ -64,7 +70,8 @@
       "throughput_tok_s": 1380.0,
       "throughput_stddev": 20.7,
       "ttft_s": 5.936231884057971,
-      "threads": 8
+      "threads": 8,
+      "samples_ts": []
     },
     {
       "kind": "pp",
@@ -73,7 +80,8 @@
       "throughput_tok_s": 1080.0,
       "throughput_stddev": 16.2,
       "ttft_s": 15.170370370370371,
-      "threads": 8
+      "threads": 8,
+      "samples_ts": []
     },
     {
       "kind": "pp",
@@ -82,7 +90,8 @@
       "throughput_tok_s": 800.0,
       "throughput_stddev": 12.0,
       "ttft_s": 40.96,
-      "threads": 8
+      "threads": 8,
+      "samples_ts": []
     },
     {
       "kind": "tg",
@@ -91,7 +100,8 @@
       "throughput_tok_s": 85.0,
       "throughput_stddev": 1.7,
       "ttft_s": null,
-      "threads": 8
+      "threads": 8,
+      "samples_ts": []
     }
   ],
   "quality": {

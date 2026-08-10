@@ -1,14 +1,15 @@
-# Free, reproducible Arm execution for judges to inspect straight from CI.
+# Free, reproducible Arm execution judges can inspect straight from CI.
 #
-# Runs on GitHub-hosted Arm runners (ubuntu-24.04-arm — GA & free for public repos, verified
+# Runs on GitHub-hosted Arm runners (ubuntu-24.04-arm, GA and free for public repos, verified
 # 2026-06-26: https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/).
 #
 # Two jobs:
-#   smoke-arm            — every push: real inference + baseline prefill sweep + report.
-#   kleidiai-before-after — the HEADLINE story: builds llama.cpp three ways (baseline,
-#                           -DGGML_CPU_KLEIDIAI=ON, -mcpu=native), runs the experiments with
-#                           quality guardrail + KleidiAI-active detection, renders the report.
-# Both render the report INTO THE RUN SUMMARY (no artifact download needed to see results)
+#   smoke-arm              every push: real inference + baseline prefill sweep + report.
+#   kleidiai-before-after  the headline: builds llama.cpp three ways (a GENERIC armv8-a floor
+#                          with repack+native OFF, the native+repack default, and KleidiAI),
+#                          runs the attribution ladder + quality guardrail + KleidiAI-active
+#                          detection, renders the report.
+# Both write the report INTO THE RUN SUMMARY (no artifact download needed to see results)
 # and upload the full HTML report + JSON results as an artifact.
 
 name: arm-bench
@@ -21,9 +22,13 @@ on:
         default: "b9873"
         type: string
       run_quant_sweep:
-        description: "Also run the Q8_0/Q4_K_M/Q4_0 quant sweep in the kleidiai job"
+        description: "Also run the secondary sweeps (quant / KV-cache / ubatch / build-flags)"
         default: true
         type: boolean
+      rounds:
+        description: "Interleaved rounds for the KleidiAI ladder (1 = fast calibration run)"
+        default: "3"
+        type: string
   push:
     branches: [main]
     paths: ["src/**", "configs/**", ".github/workflows/arm-bench.yml"]
@@ -38,6 +43,7 @@ jobs:
   smoke-arm:
     name: smoke + baseline sweep (prebuilt llama.cpp)
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
@@ -71,8 +77,8 @@ jobs:
       - name: Baseline prefill sweep (light workload — this job runs on every push)
         run: firstflight bench --label baseline --workload rag-context --repetitions 2
 
-      - name: Render report
-        run: firstflight report
+      - name: Render report (priced at this runner's $0/hr, not a paid instance)
+        run: firstflight report --instance github-arm-runner
 
       - name: Publish report to the run summary
         run: |
@@ -97,9 +103,10 @@ jobs:
           if-no-files-found: ignore
 
   kleidiai-before-after:
-    name: "headline: KleidiAI before/after (three builds, same model, same host)"
+    name: "headline: KleidiAI attribution ladder (three builds, same model, same host)"
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
@@ -117,21 +124,42 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
+            llama-generic
             llama-baseline
             llama-kleidiai
-            llama-mcpu
-          key: llama-builds-${{ env.LLAMA_TAG }}-v2
+          key: llama-builds-${{ env.LLAMA_TAG }}-v3
 
-      # NOTE: the ttft/throughput steps need llama-server + llama-batched-bench from the
-      # kleidiai build — they MUST be in the target list or those steps silently skip.
-      - name: Build llama.cpp BASELINE (no KleidiAI)
+      # ttft/throughput need llama-server + llama-batched-bench from the kleidiai build.
+      # Keep them in the target list or those steps silently skip.
+      #
+      # Why three builds (flag names + defaults verified against the pinned tag's
+      # ggml/CMakeLists.txt, 2026-08-08):
+      #   GENERIC   GGML_NATIVE=OFF GGML_CPU_ARM_ARCH=armv8-a GGML_CPU_REPACK=OFF
+      #             GGML_CPU_KLEIDIAI=OFF — the true unaccelerated floor. A plain Release
+      #             build is NOT a floor: GGML_NATIVE and GGML_CPU_REPACK default ON.
+      #   BASELINE  plain Release = native targeting + ggml's own aarch64 Q4_0 repack GEMM.
+      #   KLEIDIAI  baseline + -DGGML_CPU_KLEIDIAI=ON (Arm's kernels replace the repack path).
+      - name: Build llama.cpp GENERIC (armv8-a floor, repack+native OFF)
         run: |
           set -euxo pipefail
-          if [ ! -e llama-baseline/build/bin/llama-bench ] || [ ! -e llama-baseline/build/bin/llama-server ]; then
+          if [ ! -e llama-generic/build/bin/llama-bench ] || [ ! -e llama-generic/build/bin/llama-perplexity ]; then
+            rm -rf llama-generic
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-generic
+            cmake -S llama-generic -B llama-generic/build -DCMAKE_BUILD_TYPE=Release \
+              -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a -DGGML_CPU_REPACK=OFF -DGGML_CPU_KLEIDIAI=OFF
+            cmake --build llama-generic/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-perplexity
+          else
+            echo "cache hit - reusing llama-generic build"
+          fi
+
+      - name: Build llama.cpp BASELINE (default Release = native + aarch64 repack)
+        run: |
+          set -euxo pipefail
+          if [ ! -e llama-baseline/build/bin/llama-bench ] || [ ! -e llama-baseline/build/bin/llama-server ] || [ ! -e llama-baseline/build/bin/llama-perplexity ]; then
             rm -rf llama-baseline
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-baseline
             cmake -S llama-baseline -B llama-baseline/build -DCMAKE_BUILD_TYPE=Release
-            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench
+            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench llama-perplexity
           else
             echo "cache hit - reusing llama-baseline build"
           fi
@@ -139,26 +167,13 @@ jobs:
       - name: Build llama.cpp KLEIDIAI (-DGGML_CPU_KLEIDIAI=ON)
         run: |
           set -euxo pipefail
-          if [ ! -e llama-kleidiai/build/bin/llama-bench ] || [ ! -e llama-kleidiai/build/bin/llama-server ] || [ ! -e llama-kleidiai/build/bin/llama-batched-bench ]; then
+          if [ ! -e llama-kleidiai/build/bin/llama-bench ] || [ ! -e llama-kleidiai/build/bin/llama-server ] || [ ! -e llama-kleidiai/build/bin/llama-batched-bench ] || [ ! -e llama-kleidiai/build/bin/llama-perplexity ]; then
             rm -rf llama-kleidiai
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-kleidiai
             cmake -S llama-kleidiai -B llama-kleidiai/build -DCMAKE_BUILD_TYPE=Release -DGGML_CPU_KLEIDIAI=ON
-            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench
+            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench llama-perplexity
           else
             echo "cache hit - reusing llama-kleidiai build"
-          fi
-
-      - name: Build llama.cpp MCPU-NATIVE (-mcpu=native, the official AWS/Arm recipe)
-        run: |
-          set -euxo pipefail
-          if [ ! -e llama-mcpu/build/bin/llama-bench ]; then
-            rm -rf llama-mcpu
-            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-mcpu
-            cmake -S llama-mcpu -B llama-mcpu/build -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_C_FLAGS="-mcpu=native" -DCMAKE_CXX_FLAGS="-mcpu=native"
-            cmake --build llama-mcpu/build --config Release -j"$(nproc)" --target llama-bench llama-cli
-          else
-            echo "cache hit - reusing llama-mcpu build"
           fi
 
       - name: Install firstflight
@@ -169,17 +184,58 @@ jobs:
       - name: Remove committed synthetic examples (real runs must stay pure)
         run: rm -f bench/results/example_*.json bench/results/profile_example.json
 
-      - name: "Experiment: build flags — default vs -mcpu=native (official AWS/Arm recipe)"
+      - name: "Noise floor: same build twice (ctrl-a vs ctrl-b) — the honesty yardstick"
         env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight experiment --name noise-floor --no-report --no-quality
+
+      - name: "Experiment: KleidiAI attribution ladder (generic → repack → KleidiAI) + quality"
+        env:
+          LLAMA_GENERIC_BIN: ${{ github.workspace }}/llama-generic/build
           LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build
-          LLAMA_MCPU_BIN: ${{ github.workspace }}/llama-mcpu/build
+          LLAMA_KLEIDIAI_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        # Interleaved rounds (A,B,C,A,B,C,...) so runner drift can't masquerade as a
+        # treatment effect; the report medians per rung and shows the between-round spread.
+        run: firstflight experiment --name kleidiai --no-report --rounds "${{ github.event.inputs.rounds || '3' }}"
+
+      # ttft + throughput run EARLY (right after the ladder): they are unique evidence with
+      # no fallback, so an overtime cancel must lose the secondary sweeps below, not these.
+      - name: "Measured TTFT: prompt-cache cold vs warm (llama-server --cache-reuse, Q4_0)"
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight ttft --prefix-tokens 2048 --variant q4_0
+
+      - name: "Concurrency: aggregate tok/s at 1/2/4/8 parallel requests (Q4_0)"
+        env:
+          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight throughput --prompt-tokens 1024 --levels 1,2,4,8 --variant q4_0
+
+      - name: "Experiment: build targeting — generic armv8-a vs native(+repack)"
+        if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
+        env:
+          LLAMA_GENERIC_BIN: ${{ github.workspace }}/llama-generic/build
+          LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build
         run: firstflight experiment --name build-flags --no-report --no-quality
 
-      - name: "Experiment: KleidiAI before/after (+ quality guardrail + active-detection)"
+      # The Q4_0 ladder understates KleidiAI: ggml's repack rung already owns most of the
+      # Q4_0 headroom. Q8_0 is where KleidiAI's own kernels have room to show a clean delta.
+      - name: "Experiment: the ladder again at Q8_0 (where KleidiAI's delta isn't pre-eaten)"
+        if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
+        env:
+          LLAMA_GENERIC_BIN: ${{ github.workspace }}/llama-generic/build
+          LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build
+          LLAMA_KLEIDIAI_BIN: ${{ github.workspace }}/llama-kleidiai/build
+        run: firstflight experiment --name kleidiai-q8_0 --no-report --no-quality
+
+      # Deliberate negative control: run the KleidiAI build against Q4_K_M, which its kernels
+      # cannot touch. The probe must report KleidiAI INACTIVE and the report must refuse to
+      # credit KleidiAI for any measured difference. This is the harness catching a false claim.
+      - name: "Negative control: KleidiAI build on Q4_K_M (kernels must NOT engage)"
+        if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
         env:
           LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build
           LLAMA_KLEIDIAI_BIN: ${{ github.workspace }}/llama-kleidiai/build
-        run: firstflight experiment --name kleidiai --no-report
+        run: firstflight experiment --name kleidiai-null-control --no-report --no-quality
 
       - name: "Experiment: quant sweep (Q8_0 / Q4_K_M / Q4_0)"
         if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
@@ -199,23 +255,15 @@ jobs:
           LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
         run: firstflight experiment --name prefill-batch --no-report --no-quality
 
-      - name: "Measured TTFT: prompt-cache cold vs warm (llama-server --cache-reuse)"
+      - name: "Performix hotspots (needs apx on the runner; skip is reported, not hidden)"
         env:
           LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
-        run: firstflight ttft --prefix-tokens 2048
+        run: |
+          firstflight profile --no-download || \
+            echo "_Performix step did not produce hotspots (apx unavailable on this runner) — see docs/RUNBOOK.md section D for the VM path._" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: "Concurrency: aggregate tok/s at 1/2/4/8 parallel requests"
-        env:
-          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
-        run: firstflight throughput --prompt-tokens 1024 --levels 1,2,4,8
-
-      - name: "Performix hotspots (clean no-op unless apx is installed on the runner)"
-        env:
-          LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
-        run: firstflight profile --no-download || true
-
-      - name: Render the combined report
-        run: firstflight report
+      - name: Render the combined report (priced at this runner's $0/hr)
+        run: firstflight report --instance github-arm-runner
 
       - name: Publish report to the run summary
         run: |

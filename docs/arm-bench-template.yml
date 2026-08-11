@@ -1,0 +1,89 @@
+# Reusable template: benchmark YOUR llama.cpp workload on free GitHub Arm runners with a
+# correct three-build attribution ladder. Copy into .github/workflows/, replace the
+# placeholder step, push to a PUBLIC repo (Arm runners are free there), dispatch.
+#
+# Why three builds: a plain Release build is NOT a baseline — GGML_NATIVE and
+# GGML_CPU_REPACK default ON (llama.cpp b9873), so it already carries native targeting and
+# ggml's own aarch64 Q4_0 repack kernels. Without the generic floor, a "KleidiAI vs
+# baseline" comparison measures KleidiAI against a rival optimization and attributes the
+# remainder to the wrong mechanism.
+
+name: arm-bench-template
+
+on:
+  workflow_dispatch:
+    inputs:
+      llama_tag:
+        description: "llama.cpp release tag"
+        default: "b9873"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  LLAMA_TAG: ${{ github.event.inputs.llama_tag || 'b9873' }}
+
+jobs:
+  arm-ladder:
+    runs-on: ubuntu-24.04-arm # free for public repos; Azure Cobalt 100 (Neoverse N2)
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git time libcurl4-openssl-dev
+
+      - name: Cache the three builds (keyed on tag)
+        uses: actions/cache@v4
+        with:
+          path: |
+            llama-generic
+            llama-baseline
+            llama-kleidiai
+          key: llama-builds-${{ env.LLAMA_TAG }}-v1
+
+      - name: Build GENERIC (armv8-a floor — repack + native OFF)
+        run: |
+          set -euxo pipefail
+          if [ ! -e llama-generic/build/bin/llama-bench ]; then
+            rm -rf llama-generic
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-generic
+            cmake -S llama-generic -B llama-generic/build -DCMAKE_BUILD_TYPE=Release \
+              -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a -DGGML_CPU_REPACK=OFF -DGGML_CPU_KLEIDIAI=OFF
+            cmake --build llama-generic/build --config Release -j"$(nproc)" --target llama-bench llama-cli
+          fi
+
+      - name: Build BASELINE (default Release = native + aarch64 repack)
+        run: |
+          set -euxo pipefail
+          if [ ! -e llama-baseline/build/bin/llama-bench ]; then
+            rm -rf llama-baseline
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-baseline
+            cmake -S llama-baseline -B llama-baseline/build -DCMAKE_BUILD_TYPE=Release
+            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-cli
+          fi
+
+      - name: Build KLEIDIAI (-DGGML_CPU_KLEIDIAI=ON)
+        run: |
+          set -euxo pipefail
+          if [ ! -e llama-kleidiai/build/bin/llama-bench ]; then
+            rm -rf llama-kleidiai
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-kleidiai
+            cmake -S llama-kleidiai -B llama-kleidiai/build -DCMAKE_BUILD_TYPE=Release -DGGML_CPU_KLEIDIAI=ON
+            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-cli
+          fi
+
+      - name: RUN YOUR BENCHMARK HERE (once per build; interleave rounds; use a Q4_0 GGUF)
+        run: |
+          # Example skeleton — replace with your own model + sweep. KleidiAI accelerates
+          # Q4_0/Q8_0 only; verify activation by grepping the load log for CPU_KLEIDIAI.
+          for BUILD in llama-generic llama-baseline llama-kleidiai; do
+            echo "== $BUILD =="
+            # ./$BUILD/build/bin/llama-bench -m your-model-q4_0.gguf -p 2048,8192 -n 32 -r 3 -o json
+          done
+
+      - name: Publish to the run summary
+        run: echo "Put your results table here" >> "$GITHUB_STEP_SUMMARY"

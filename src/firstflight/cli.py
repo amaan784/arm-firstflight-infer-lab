@@ -88,14 +88,28 @@ def smoke(no_download: bool, n_predict: int, timeout: float) -> None:
 
 @main.command()
 @click.option("--force", is_flag=True, help="Re-download even if cached.")
-def download(force: bool) -> None:
-    """Download the default smoke model only."""
+@click.option("--model", "model_id", default=None, help="Model id (default: smoke model).")
+@click.option("--variant", default=None, help="Quant variant (default: model's default).")
+def download(force: bool, model_id: str | None, variant: str | None) -> None:
+    """Download a model's GGUF (default: the smoke model). Resumable; retries on throttling."""
     from .config import load_models
-    from .download import ensure_model
+    from .download import DownloadError, ensure_model
+    from .util import safe
 
     models = load_models()
-    spec, variant = models.smoke()
-    path = ensure_model(spec, variant, force=force)
+    if model_id is None:
+        spec, mv = models.smoke()
+        if variant:
+            mv = spec.variant(variant)
+    else:
+        spec = models.get(model_id)
+        mv = spec.variant(variant) if variant else next(iter(spec.variants.values()))
+
+    try:
+        path = ensure_model(spec, mv, force=force)
+    except DownloadError as exc:
+        console.print(f"[red]download failed:[/] {safe(str(exc))}")
+        sys.exit(1)
     console.print(f"[green]OK[/] {path}")
 
 

@@ -70,3 +70,85 @@ def test_detect_kleidiai(monkeypatch, tmp_path):
 
     monkeypatch.setattr(llama_cpp, "run_once", fake_run("boom", ok=False))
     assert llama_cpp.detect_kleidiai(Path("x"), Path("m")) is None
+
+
+# --- model download: resume + retry -------------------------------------------
+
+
+class _FakeResp:
+    """Minimal requests.Response stand-in for the streaming download path."""
+
+    def __init__(self, body: bytes, status: int = 200, total: int | None = None):
+        self._body = body
+        self.status_code = status
+        self.headers = {"content-length": str(total if total is not None else len(body))}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests as _rq
+
+            raise _rq.HTTPError(f"status {self.status_code}")
+
+    def iter_content(self, chunk_size=None):
+        yield self._body
+
+
+def test_download_resumes_from_partial(tmp_path, monkeypatch):
+    """A retry must continue from the .part file, not restart the transfer."""
+    from firstflight import download as dl
+
+    tmp = tmp_path / "m.gguf.part"
+    tmp.write_bytes(b"AAAA")  # 4 bytes already fetched
+    seen = {}
+
+    def fake_get(url, **kw):
+        seen["range"] = kw.get("headers", {}).get("Range")
+        return _FakeResp(b"BBBB", status=206, total=4)
+
+    monkeypatch.setattr(dl.requests, "get", fake_get)
+    dl._fetch_with_resume("http://x/m.gguf", tmp, "m.gguf")
+    assert seen["range"] == "bytes=4-"
+    assert tmp.read_bytes() == b"AAAABBBB"  # appended, not overwritten
+
+
+def test_download_retries_then_succeeds(tmp_path, monkeypatch):
+    import requests as _rq
+
+    from firstflight import download as dl
+
+    calls = {"n": 0}
+
+    def flaky_get(url, **kw):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _rq.ConnectionError("throttled")
+        return _FakeResp(b"DATA")
+
+    monkeypatch.setattr(dl.requests, "get", flaky_get)
+    monkeypatch.setattr(dl.time, "sleep", lambda *_: None)
+    out = tmp_path / "m.gguf.part"
+    dl._fetch_with_resume("http://x/m.gguf", out, "m.gguf")
+    assert calls["n"] == 3
+    assert out.read_bytes() == b"DATA"
+
+
+def test_download_gives_up_with_clear_error(tmp_path, monkeypatch):
+    import requests as _rq
+
+    from firstflight import download as dl
+
+    def always_fail(url, **kw):
+        raise _rq.ConnectionError("nope")
+
+    monkeypatch.setattr(dl.requests, "get", always_fail)
+    monkeypatch.setattr(dl.time, "sleep", lambda *_: None)
+    import pytest
+
+    with pytest.raises(dl.DownloadError, match="giving up"):
+        dl._fetch_with_resume("http://x/m.gguf", tmp_path / "m.gguf.part", "m.gguf")

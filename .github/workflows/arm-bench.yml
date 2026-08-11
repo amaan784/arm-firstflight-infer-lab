@@ -217,6 +217,24 @@ jobs:
       - name: Remove committed synthetic examples (real runs must stay pure)
         run: rm -f bench/results/example_*.json bench/results/profile_example.json
 
+      # Fetch every model the ladder needs BEFORE benchmarking, so a throttled HF response
+      # fails on its own line instead of looking like a benchmark failure, and so the cache
+      # save below banks the download even if a later step dies.
+      - name: Pre-download models (resumable, retried)
+        run: |
+          firstflight download --model qwen2.5-0.5b-instruct --variant q4_0
+          firstflight download --model qwen2.5-1.5b-instruct --variant q4_0
+          firstflight download --model qwen2.5-1.5b-instruct --variant q8_0
+          firstflight download --model qwen2.5-1.5b-instruct --variant q4_k_m
+          ls -lh models/
+
+      - name: Save model cache early (bank the downloads before benchmarking)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+
       - name: "Noise floor: same build twice (ctrl-a vs ctrl-b) — the honesty yardstick"
         env:
           LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build

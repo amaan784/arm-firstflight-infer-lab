@@ -1,26 +1,26 @@
-# The Explainer — every concept in this project, in plain language
+# The Explainer: every concept in this project, in plain language
 
-Read this once and you can explain the whole project: what problem it attacks, what every
+Read this once and you can explain the whole project: what problem it addresses, what every
 term means, how the code is put together, and why each decision was made. (How to *run* it
 is in [RUNBOOK.md](RUNBOOK.md); how we *measure* is in [METHODOLOGY.md](METHODOLOGY.md).)
 
-**How to read it:** §2 is the absolute basics — start there if words like "token" or
-"quantization" are new. Already comfortable? Jump to §3. §8 is a one-line-per-term glossary
-for quick lookup mid-conversation.
+**How to read it:** §2 covers the basics; start there if words like "token" or
+"quantization" are new, otherwise jump to §3. §8 is a one-line-per-term glossary
+for quick lookup.
 
 ---
 
-## 1. The story in one paragraph
+## 1. The project in one paragraph
 
-Large language models are increasingly run on **CPUs in the cloud** — specifically **Arm**
-CPUs (AWS Graviton, Google Axion, Microsoft Cobalt), because they're cheap and efficient.
-The pain point users actually feel is the **wait before the first word appears** —
-*time-to-first-token (TTFT)* — and it gets brutal when the prompt is long (as in RAG and
-agent apps that stuff documents into the context). This project is a harness that
-**measures** that pain precisely on Arm, **applies seven Arm-specific optimizations**
-(KleidiAI kernels, the right quantization, CPU pinning, quantized KV-cache), **proves** the
-speedup with rigorous before/after numbers plus an accuracy check, and **auto-generates a
-report** anyone can reproduce with one click on a free Arm CI runner.
+Large language models are increasingly run on CPUs in the cloud, specifically Arm
+CPUs (AWS Graviton, Google Axion, Microsoft Cobalt), because they are cheap and efficient.
+The delay users feel is the wait before the first word appears, called
+*time-to-first-token (TTFT)*, and it grows fast when the prompt is long (as in RAG and
+agent apps that put documents into the context). This project is a harness that
+measures that delay on Arm, applies seven Arm-specific optimizations
+(KleidiAI kernels, the right quantization, CPU pinning, quantized KV-cache), verifies the
+speedup with before/after numbers plus an accuracy check, and generates a
+report anyone can reproduce with one click on a free Arm CI runner.
 
 ## 2. The absolute basics (start here if any term below is new)
 
@@ -46,12 +46,12 @@ their own rather than buying someone else's.
 **Compute-bound vs memory-bound.** A CPU does arithmetic far faster than it can fetch data from
 memory, so any piece of work is limited by one or the other, and which one decides what will
 speed it up:
-- **Compute-bound**: the data is already in cache and the processor simply has a lot of maths to
+- **Compute-bound**: the data is already in cache and the processor has a lot of arithmetic to
   do. Faster instructions and more cores help.
 - **Memory-bound**: the processor sits idle waiting for weights to arrive from RAM. Adding cores
   achieves nothing; making the data smaller does.
 
-This distinction determines which optimization applies where, so it is worth holding onto.
+This distinction determines which optimization applies where.
 
 **Compiling and build flags.** llama.cpp ships as C++ source that you compile into an
 executable. A build flag is an option given to the compiler that changes which code ends up in
@@ -85,7 +85,7 @@ the time. Arm's is called Performix.
 ## 3. The project's core concepts
 
 ### Inference, prefill, and generation
-Running an LLM has two phases with totally different characters:
+Running an LLM has two phases with different performance characteristics:
 
 - **Prefill (prompt processing):** the model must process the entire prompt before it can emit
   anything. All prompt tokens are handled at once, as large matrix-matrix multiplications, so
@@ -94,7 +94,7 @@ Running an LLM has two phases with totally different characters:
   comparatively little arithmetic but must read the weights from memory again, so generation is
   **memory-bound**.
 
-**TTFT ≈ prompt_tokens ÷ prefill_speed**, the derivation the harness pivots on
+**TTFT ≈ prompt_tokens ÷ prefill_speed**. The harness derives TTFT this way
 (`bench/prefill.py:ttft_seconds`). At 520 tokens/sec, a 32,768-token prompt takes about 63
 seconds before the first word appears; make prefill 1.5× faster and the same request starts
 answering in about 42 seconds, with the same model on the same machine.
@@ -107,21 +107,21 @@ the curve.
 ### Why Arm / Neoverse
 **Neoverse** is Arm's server-CPU family: Graviton2 = Neoverse-N1, Graviton3 = V1,
 Graviton4 = V2, Graviton5 = V3; Azure Cobalt 100 = N2, Google Axion = V2 (C4A) / N3 (N4A).
-Cloud vendors love them for price/efficiency, so a growing slice of LLM serving happens there.
+Cloud vendors adopted them for price and efficiency, so a growing share of LLM serving happens there.
 Arm cores include instructions that do many arithmetic operations at once instead of one at a
 time: **DOTPROD**, **i8mm** (int8 matrix-multiply), **BF16**, and the **SVE/SVE2** vector
-extensions. Ordinary compiled code often doesn't use them; optimized kernels do. Getting the
-kernels that use them is the whole opportunity here.
-(**SME/SME2**, Arm's newer matrix extension, is *client* silicon only today — phones and
-Apple Macs. No shipping Neoverse server core implements it, so it is not part of this story;
+extensions. Ordinary compiled code often doesn't use them; optimized kernels do. The
+opportunity this project targets is getting kernels that use them.
+(**SME/SME2**, Arm's newer matrix extension, exists only in client silicon today: phones and
+Apple Macs. No shipping Neoverse server core implements it, so it is out of scope here;
 verified against Arm's own SME2 device list and AWS's Graviton feature table, 2026-08-09.)
 
 ### llama.cpp, GGUF, and the tools
-- **llama.cpp** — the standard open-source C++ engine for running LLMs on CPUs. We drive it,
+- **llama.cpp**: the standard open-source C++ engine for running LLMs on CPUs. We drive it,
   never fork it.
-- **GGUF** — its model file format (all the weights + metadata in one file you download).
-- **llama-cli** — its generate-text binary (our smoke test and quality probe use it).
-- **llama-bench** — its built-in benchmarker: give it `-p` (prefill sizes) and `-n`
+- **GGUF**: its model file format (all the weights plus metadata in one file you download).
+- **llama-cli**: its generate-text binary (our smoke test and quality probe use it).
+- **llama-bench**: its built-in benchmarker. Give it `-p` (prefill sizes) and `-n`
   (generation sizes) and it outputs timing rows; `-o json` makes them machine-readable.
   We parse `avg_ts` (mean tokens/sec) and `stddev_ts` (spread across repeats) from it.
 
@@ -132,29 +132,28 @@ is about 3 GB at 16 bits and under 1 GB at 4 bits. Fewer bits means less RAM, le
 and faster arithmetic, in exchange for a small rounding error in the weights:
 - **Q8_0**: 8 bits/weight. Nearly lossless, biggest of the three.
 - **Q4_0**: 4 bits/weight, simple blocks. Small and fast, slightly lossier.
-- **Q4_K_M**: 4-bit "k-quant" — cleverer packing, usually better accuracy than Q4_0, and the
+- **Q4_K_M**: 4-bit "k-quant" with smarter packing. Usually better accuracy than Q4_0, and the
   default most people pick.
 
-**The catch that powers our headline:** Arm's KleidiAI kernels accelerate **only Q4_0 and
-Q8_0** — *not* Q4_K_M. So the "sensible default" quant silently opts you out of Arm
-acceleration. Choosing Q4_0 *because of the silicon* is optimization #2, and the quant-sweep
-experiment + quality probe prove what that choice costs and buys.
+The catch behind our headline result: Arm's KleidiAI kernels accelerate only Q4_0 and
+Q8_0, not Q4_K_M. Picking the common default quant therefore opts you out of Arm
+acceleration. Choosing Q4_0 to match the silicon is optimization #2, and the quant-sweep
+experiment plus the quality probe measure what that choice costs and buys.
 
 ### KleidiAI (optimization #1, the headline)
-**KleidiAI** is Arm's library of hand-tuned matrix **microkernels** — tiny routines written
-by Arm's engineers to do one operation (matrix multiply) as fast as this exact silicon
+**KleidiAI** is Arm's library of hand-tuned matrix **microkernels**: small routines written
+by Arm's engineers to run one operation (matrix multiply) as fast as the silicon
 allows. It picks the best available kernel at runtime, preferring SME2 → i8mm → dotprod; on a
 Neoverse server the SME2 tier never fires (no server core has SME), so the win comes from the
 i8mm/dotprod kernels. llama.cpp integrates it behind the build flag
-`-DGGML_CPU_KLEIDIAI=ON`. At model load it **repacks** Q4_0/Q8_0 weights once into a
+`-DGGML_CPU_KLEIDIAI=ON`. At model load it repacks Q4_0/Q8_0 weights once into a
 layout its kernels can read efficiently, then routes the matrix multiplications through the fast
-paths. Same model file, same commands, different machine code underneath. Because it's a *build-time* flag, our before/after
-compares **llama.cpp builds** (the CI job compiles the full ladder: a generic armv8-a floor,
-the native default with ggml's own aarch64 repack kernels, and the KleidiAI build). And
-because "we
-compiled with the flag" ≠ "the kernels actually ran", the harness **proves activation**:
-when KleidiAI is live, the load log prints `load_tensors: CPU_KLEIDIAI model buffer size…` —
-we grep for it (`detect_kleidiai`) and print yes/no in the report's `kleidiai` column.
+paths. The model file and commands are unchanged; only the machine code differs. Because it is a build-time flag, our before/after
+compares llama.cpp builds (the CI job compiles the full ladder: a generic armv8-a floor,
+the native default with ggml's own aarch64 repack kernels, and the KleidiAI build). Compiling
+with the flag does not guarantee the kernels ran, so the harness checks activation:
+when KleidiAI is live, the load log prints `load_tensors: CPU_KLEIDIAI model buffer size…`.
+We grep for that line (`detect_kleidiai`) and print yes/no in the report's `kleidiai` column.
 
 ### Thread pinning (optimization #3)
 More threads stop helping once memory bandwidth is the limit, and the OS scheduler moves threads
@@ -167,44 +166,45 @@ experiments measure both effects.
 During generation the model keeps a **KV-cache**: stored "keys" and "values" for every token
 seen so far, so each new word doesn't recompute the past. At long context that store becomes
 large, and moving it competes for the same memory bandwidth as the weights.
-`llama-bench -ctk q8_0 -ctv q8_0` stores it at 8 bits instead of 16, **halving its footprint and
-traffic**, which is exactly the pressure point on Neoverse at long context. The kv-cache experiment measures f16 vs q8_0, with the quality probe watching
+`llama-bench -ctk q8_0 -ctv q8_0` stores it at 8 bits instead of 16, halving its footprint and
+traffic, which relieves the memory-bandwidth pressure Neoverse hits at long context. The kv-cache experiment measures f16 vs q8_0, with the quality probe watching
 for accuracy cost.
 
 ### Prefix caching, and measured vs derived TTFT
 The KV-cache enables one more optimization: when two requests share a long **prefix** (the same
 system prompt, or the same retrieved document), the server can keep that portion of the cache and
-process only the part that differs. That's **prompt/prefix caching** — llama-server does it by default
+process only the part that differs. That is **prompt/prefix caching**. llama-server does it by default
 (`cache_prompt`), and `--cache-reuse` extends it to near-matches. For agent/RAG serving this
-is the biggest honest TTFT lever there is: the first ("cold") turn pays full prefill; every
-following ("warm") turn processes only the new question. `firstflight ttft` demonstrates it —
-and unlike the benchmark's *derived* TTFT (prompt ÷ speed), it reports the server's **own
-measured** `prompt_ms` stopwatch, cold vs warm, side by side.
+is the largest TTFT lever available: the first ("cold") turn pays full prefill; every
+following ("warm") turn processes only the new question. `firstflight ttft` demonstrates it,
+and unlike the benchmark's derived TTFT (prompt ÷ speed), it reports the server's own
+measured `prompt_ms` timing, cold vs warm, side by side.
 
 ### Arm Performix (the profiler)
 **Performix** is Arm's performance-analysis tool for Neoverse servers; its CLI is **`apx`**.
-It samples where CPU time actually goes ("**hotspots**" — which functions burn the cycles).
+It samples where CPU time goes ("**hotspots**": the functions that consume the cycles).
 Our wrapper runs its `code_hotspots` recipe against a prefill run and surfaces the top
-functions into the report — so the optimization isn't a guess ("the matmul kernel dominates;
-KleidiAI replaces exactly that kernel") but an attribution. Off Arm it politely does nothing.
+functions into the report. That grounds the optimization in an attribution rather than a guess:
+the profile shows the matmul kernel dominates, and KleidiAI replaces that kernel. On
+non-Arm machines it skips without error.
 
 ### The quality guardrail
-A speedup that breaks the model is worthless, and quantization *can* degrade answers. After
-every experiment config we run a small **exact-match probe** (fixed Q&A through llama-cli —
-"What is 5 multiplied by 6?" must contain "30" as a whole word) and print accuracy next to the speed. It's
-a smoke alarm, not a leaderboard — the report shows correct/total per config ("32/40 → 32/40").
+A speedup that breaks the model is worthless, and quantization can degrade answers. After
+every experiment config we run a small **exact-match probe** (fixed Q&A through llama-cli:
+"What is 5 multiplied by 6?" must contain "30" as a whole word) and print accuracy next to the speed. It is
+a coarse regression check, not a benchmark of model quality; the report shows correct/total per config ("32/40 → 32/40").
 
 ### Cost per million tokens
-The business translation: `$/M tokens = hourly_price ÷ (tokens_per_sec × 3600) × 1e6`.
-Faster tokens on the same rented machine = cheaper tokens; nothing else changes. We use
-**real, dated prices** (e.g. c8g.2xlarge $0.319/hr, us-east-1) so the report ends in
-dollars, not just milliseconds.
+The cost translation: `$/M tokens = hourly_price ÷ (tokens_per_sec × 3600) × 1e6`.
+Faster tokens on the same rented machine mean cheaper tokens; nothing else changes. We use
+real, dated prices (e.g. c8g.2xlarge $0.319/hr, us-east-1) so the report ends in
+dollars as well as milliseconds.
 
 ### The agentic autotuner (stretch)
 `firstflight autotune --enable` closes the loop automatically: propose a config → benchmark
 it → keep the best → stop when nothing improves. The default proposer is a deterministic
 grid (no API key needed); `--llm` swaps in Claude, which reads the Performix hotspots and
-trial history and proposes the next config as JSON (falling back to the grid if it misbehaves).
+trial history and proposes the next config as JSON (falling back to the grid on invalid output).
 
 ## 4. How the code is put together
 
@@ -220,41 +220,41 @@ flowchart LR
     A[autotune/agent.py] -->|propose→measure loop| R
 ```
 
-Design rules that shaped everything:
-- **Degrade gracefully**: on a machine without llama.cpp or off Arm, every command skips
-  with a clear message instead of crashing (that's why it runs on your Windows laptop).
+Design rules that shaped the code:
+- **Skip, don't crash**: on a machine without llama.cpp or off Arm, every command skips
+  with a clear message instead of crashing (which is why it also runs on a Windows laptop).
 - **Verify, don't invent**: every external fact (flags, URLs, prices, runner labels) was
-  checked against a live source, dated in [CONFIRM_ON_ARM.md](CONFIRM_ON_ARM.md); genuinely
-  box-only unknowns are marked `TODO(confirm)` instead of guessed.
+  checked against a live source, dated in [CONFIRM_ON_ARM.md](CONFIRM_ON_ARM.md); unknowns
+  that can only be confirmed on the box are marked `TODO(confirm)` instead of guessed.
 - **Results are self-describing JSON** so a committed result is interpretable years later.
-- **Honesty is enforced in code**: synthetic data carries a `[SYNTHETIC]` tag and the report
+- **Labeling is enforced in code**: synthetic data carries a `[SYNTHETIC]` tag and the report
   auto-shows a DEMO banner whenever it renders any.
 
-## 5. What was actually done, in order
+## 5. What was done, in order
 
-1. **Scaffold + smoke** — installable package, configs, tiny-model smoke test that proves
-   the pipeline anywhere.
-2. **Benchmark core** — llama-bench driver, context sweep, derived TTFT, variance, peak RSS.
-3. **Report** — the one-page standalone HTML (the "WOW" artifact) + markdown twin.
-4. **Performix** — `apx` wrapper (real CLI flow sourced from Arm's own MCP server) feeding
+1. **Scaffold + smoke**: installable package, configs, and a tiny-model smoke test that proves
+   the pipeline on any machine.
+2. **Benchmark core**: llama-bench driver, context sweep, derived TTFT, variance, peak RSS.
+3. **Report**: the one-page standalone HTML report plus its markdown twin.
+4. **Performix**: `apx` wrapper (real CLI flow sourced from Arm's own MCP server) feeding
    hotspots into the report.
-5. **Experiments + quality** — the optimization axes as declarative configs, run
+5. **Experiments + quality**: the optimization axes as declarative configs, run
    back-to-back on the same machine, each with the quality probe.
-6. **Autotuner** — the optional propose→measure loop.
-7. **Hardening & winnability** — a multi-agent audit found and fixed 4 latent bugs (peak-RSS
+6. **Autotuner**: the optional propose→measure loop.
+7. **Hardening**: a multi-agent audit found and fixed 4 latent bugs (peak-RSS
    attribution, quality false-positives, a regex bug, console markup eating `[report]`);
-   then: `setup-engine` (prebuilt llama.cpp auto-download, verified against the real binary —
+   then `setup-engine` (prebuilt llama.cpp auto-download, verified against the real binary,
    which also exposed and fixed a real stdin hang), KleidiAI-active detection, real dated
-   prices, the KV-cache axis, and a CI job that runs the *entire* before/after story on a
+   prices, the KV-cache axis, and a CI job that runs the full before/after comparison on a
    free Arm runner and prints the report into the run summary.
-8. **`versions/` v1→v7** — the same final code sliced into seven cumulative, independently
-   runnable stages so the build can be reviewed one layer at a time.
+8. **Staged commit history**: the project was committed in dependency order, each stage
+   installable and passing its own tests, so the build can be read one layer at a time.
 
 ## 6. What's real vs pending
 
 - **Real:** all code paths, 90+ passing tests, verified flags/URLs/prices, the engine
   download, the report pipeline.
-- **Synthetic (clearly labeled):** the sample report's performance numbers — they exist so
+- **Synthetic (clearly labeled):** the sample report's performance numbers. They exist so
   the repo demonstrates its output before hardware runs.
 - **Pending (one click, needs your GitHub account):** dispatch the `arm-bench` →
   `kleidiai-before-after` workflow; it produces the real before/after evidence to commit
@@ -262,33 +262,34 @@ Design rules that shaped everything:
 
 ## 7. Questions a judge might ask (and the answers)
 
-- *"Why focus on prefill instead of tokens/sec?"* — Generation speed is what benchmarks
-  usually quote, but agent/RAG users wait on **prefill** (TTFT) because their prompts are
-  huge. It's also the phase Arm's matrix instructions accelerate most (compute-bound).
-- *"Isn't this just llama.cpp's own benchmark?"* — llama-bench measures one config once. The
-  contribution is the controlled **before/after harness on top**: fixed instance/model,
+- *"Why focus on prefill instead of tokens/sec?"* Generation speed is what benchmarks
+  usually quote, but agent/RAG users wait on prefill (TTFT) because their prompts are
+  large. It is also the phase Arm's matrix instructions accelerate most (compute-bound).
+- *"Isn't this just llama.cpp's own benchmark?"* llama-bench measures one config once. The
+  contribution is the controlled before/after harness on top: fixed instance/model,
   KleidiAI-activation proof, quality guardrail, cost translation, profiler attribution, and
-  one-click reproducibility — the parts that turn a timing into evidence.
-- *"Why is Q4_K_M slower than Q4_0 here? Isn't K-quant better?"* — Better accuracy per bit,
-  yes — but KleidiAI doesn't accelerate k-quants, so on Neoverse Q4_K_M runs on generic
-  kernels while Q4_0 gets the i8mm/dotprod path. That trade (and its accuracy cost) is exactly
-  what the quant-sweep + quality probe quantify.
-- *"How do I know KleidiAI actually kicked in?"* — The `kleidiai` column: the harness greps
-  the load log for the `CPU_KLEIDIAI` buffer marker at runtime. No marker, no claim.
-- *"What here do I reuse in my own project?"* — The harness itself, the three-build CI recipe,
-  the `apx` wrapper, the Q4_0-only gotcha, and the methodology — see the README's
+  one-click reproducibility. Those are the parts that turn a timing into evidence.
+- *"Why is Q4_K_M slower than Q4_0 here? Isn't K-quant better?"* K-quants have better
+  accuracy per bit, but KleidiAI does not accelerate them, so on Neoverse Q4_K_M runs on generic
+  kernels while Q4_0 gets the i8mm/dotprod path. The quant-sweep and quality probe quantify
+  that trade and its accuracy cost.
+- *"How do I know KleidiAI actually kicked in?"* The `kleidiai` column: the harness greps
+  the load log for the `CPU_KLEIDIAI` buffer marker at runtime. If the marker is absent, the
+  report says no.
+- *"What here do I reuse in my own project?"* The harness itself, the three-build CI recipe,
+  the `apx` wrapper, the Q4_0-only gotcha, and the methodology; see the README's
   "Reusable beyond this repo".
 
-## 8. Glossary — one line per term
+## 8. Glossary: one line per term
 
 | Term | Meaning |
 |---|---|
 | **Token** | A chunk of text a model processes, about four characters; 1,000 tokens ≈ 750 words |
-| **LLM** | Large language model — billions of weights predicting the next token |
+| **LLM** | Large language model: billions of weights predicting the next token |
 | **Inference** | Running a trained model (vs training = creating it) |
 | **Prefill** | Reading the whole prompt before answering; parallel, compute-bound |
 | **Generation / decode** | Producing output one token at a time; memory-bandwidth-bound |
-| **TTFT** | Time-to-first-token: the silence before the first word ≈ prompt ÷ prefill speed |
+| **TTFT** | Time-to-first-token: the delay before the first output token ≈ prompt ÷ prefill speed |
 | **Context length** | How many tokens of prompt/history the model is fed |
 | **tokens/sec (tok/s)** | The universal speed unit here; `avg_ts` in llama-bench output |
 | **Compute-bound** | Limited by how fast the CPU can do arithmetic |
@@ -296,9 +297,9 @@ Design rules that shaped everything:
 | **llama.cpp** | The standard C++ engine for LLM inference on CPUs |
 | **GGUF** | llama.cpp's single-file model format |
 | **llama-bench / llama-cli** | llama.cpp's benchmarker / text-generation binary |
-| **Quantization** | Storing weights in fewer bits (3.14159 → 3.14): smaller, faster, tiny error |
-| **Q4_0 / Q8_0** | Simple 4-bit / 8-bit quant formats — the ones KleidiAI accelerates |
-| **Q4_K_M** | Smarter 4-bit "k-quant"; common default; **not** KleidiAI-accelerated |
+| **Quantization** | Storing weights in fewer bits (3.14159 → 3.14): smaller, faster, small error |
+| **Q4_0 / Q8_0** | Simple 4-bit / 8-bit quant formats; the ones KleidiAI accelerates |
+| **Q4_K_M** | Smarter 4-bit "k-quant"; common default; not KleidiAI-accelerated |
 | **KV-cache** | Stored intermediate values for tokens already read, reused each generation step |
 | **Prefix/prompt caching** | Reusing the KV-cache for a shared prompt prefix, so warm turns skip almost all prefill (`cache_prompt`, `--cache-reuse`) |
 | **llama-server** | llama.cpp's HTTP server; its `/completion` response includes measured `timings` (our measured TTFT) |
@@ -310,16 +311,16 @@ Design rules that shaped everything:
 | **Neoverse** | Arm's server-CPU family (Graviton2=N1, Graviton3=V1, Graviton4=V2) |
 | **Graviton / Axion / Cobalt** | AWS / Google / Microsoft's Arm server chips |
 | **Thread pinning / affinity** | Fixing threads to specific cores (`-C mask --cpu-strict`) |
-| **Warm-up run** | Discarded first lap on cold tires |
-| **stddev / variance** | The spread across repeats — honesty about noise |
-| **Peak RSS** | Maximum RAM the benchmark process actually used |
+| **Warm-up run** | Discarded first run that pays for cache misses and page faults |
+| **stddev / variance** | The spread across repeats, reported alongside each mean |
+| **Peak RSS** | Maximum RAM the benchmark process used |
 | **Performix / apx** | Arm's Neoverse profiler and its CLI |
-| **Hotspot** | A function where the profiler says the CPU time actually goes |
-| **Build flag** | A compile-time option — same source, different engine inside |
-| **CI / GitHub Actions** | Robot machines that run checks/benchmarks on every change |
+| **Hotspot** | A function where the profiler says the CPU time goes |
+| **Build flag** | A compile-time option: same source, different machine code |
+| **CI / GitHub Actions** | GitHub-hosted machines that run checks/benchmarks on every change |
 | **Arm runner** | GitHub's free-for-public-repos Arm machine (`ubuntu-24.04-arm`) |
 | **Artifact (CI)** | Files a CI run saves for download (our HTML report + JSONs) |
-| **venv / pip / editable install** | Project-private toolbox / installer / live-linked install |
+| **venv / pip / editable install** | Project-private environment / package installer / install that picks up code edits |
 | **Smoke test** | Minimal end-to-end run proving the pipeline works at all |
 | **$/M tokens** | Dollars per million tokens: `price/hr ÷ (tok/s × 3600) × 1e6` |
 | **Synthetic data** | Clearly-labeled illustrative numbers (DEMO banner), not measurements |

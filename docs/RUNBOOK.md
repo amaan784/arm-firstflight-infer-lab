@@ -1,4 +1,4 @@
-# Runbook — how to run, test, and ship Arm FirstFlight
+# Runbook: how to run, test, and ship Arm FirstFlight
 
 The operator's guide, start to finish: local run on any machine → review builds → free Arm CI
 → optional Arm VM → submission. (The README has the project story; this is the hands-on list.)
@@ -51,31 +51,33 @@ firstflight report            # from your real results in bench/results/
 firstflight report --demo     # or the synthetic layout preview
 ```
 
-Open the newest `bench/reports/report-*.html` in a browser — it's fully standalone.
+Open the newest `bench/reports/report-*.html` in a browser. The report is a single standalone file.
 
 **PowerShell notes:** if `activate` is blocked by execution policy, either run
 `Set-ExecutionPolicy -Scope Process Bypass` first, or skip activation and prefix commands with
-`.\.venv\Scripts\` (e.g. `.\.venv\Scripts\firstflight.exe smoke`). Quote paths — this folder
+`.\.venv\Scripts\` (e.g. `.\.venv\Scripts\firstflight.exe smoke`). Quote paths; this folder
 name contains spaces.
 
 ## B. Review the build stage-by-stage
 
-Each `versions/vN` is cumulative and independently runnable (v1 foundation → v7 = full project):
+The repo was committed in stages, in dependency order: foundation and smoke, benchmark sweep,
+report, profiling, experiments and quality, autotuner, integration, then hardening. Each commit
+installs and passes its own tests, so checking one out gives a working project with fewer
+features rather than a broken one.
 
 ```powershell
-cd versions\v3          # any stage
+git log --oneline --reverse      # the stages, oldest first
+git checkout <sha>               # any stage
 python -m venv .venv ; .\.venv\Scripts\activate
-# or conda (one env per stage): conda create -n ff-v3 python=3.12 -y ; conda activate ff-v3
-pip install -e ".[report,dev]"    # ".[dev]" suffices for v1/v2
+pip install -e ".[report,dev]"   # ".[dev]" suffices for the first two stages
 pytest
-firstflight info
+firstflight info                 # later stages register more commands
+git checkout main                # back to the current project
 ```
-
-Each `vN/README.md` says exactly what that stage adds.
 
 ## C. Free Arm execution via GitHub (the real numbers)
 
-1. **Create the repo** (must be **public** — Arm runners are free only for public repos):
+1. **Create the repo** (must be public: Arm runners are free only for public repos):
    ```powershell
    git init
    git add -A
@@ -84,27 +86,27 @@ Each `vN/README.md` says exactly what that stage adds.
    ```
    (or create it on github.com and `git remote add origin ... ; git push -u origin main`)
 
-2. **Repo URL** in `pyproject.toml` `[project.urls]` — already set (`amaan784/arm-firstflight-infer-lab`).
+2. **Repo URL** in `pyproject.toml` `[project.urls]`: already set (`amaan784/arm-firstflight-infer-lab`).
 
 3. **CI runs automatically on push:** `CI` (lint + tests + demo report, every push) and the
    `arm-bench` **smoke-arm** job (real inference + baseline sweep on an Arm runner; report
-   appears in the run's Summary tab). Note smoke-arm is path-filtered — it runs only when
+   appears in the run's Summary tab). smoke-arm is path-filtered: it runs only when
    `src/`, `configs/`, or the workflow file change (a docs-only commit skips it).
 
 4. **The headline run:** GitHub → Actions → **arm-bench** → *Run workflow*.
    This dispatches **kleidiai-before-after**: builds llama.cpp three ways (generic armv8-a
    floor / native+repack default / KleidiAI), runs the attribution ladder (3 interleaved
    rounds) + noise-floor control + quality guardrail + perplexity + KleidiAI-active detection
-   + the quant sweep, and renders the report **into the run summary**. The standalone HTML
+   + the quant sweep, and renders the report into the run summary. The standalone HTML
    report + JSON results are attached as the `arm-headline-*` artifact.
    *(No write access to the repo? Fork it, enable workflows on the fork when GitHub asks,
-   and dispatch there — `Run workflow` needs write permission.)*
+   and dispatch there; `Run workflow` needs write permission.)*
 
 5. **Promote the real numbers:** download that artifact, copy its report + results over
    `bench/reports/` / `bench/results/` (replacing the synthetic sample), update the README
    headline with the real before/after figures, commit.
 
-## D. Optional — remote Arm VM (bigger models, Performix)
+## D. Optional: remote Arm VM (bigger models, Performix)
 
 Cheapest options (prices verified 2026-07-05, us-east-1): AWS `t4g.small` free-trial
 (750 h/mo through 2026), `c8g.2xlarge` ≈ $0.319/hr for the headline box, or Oracle A1
@@ -118,24 +120,24 @@ make bench && make report             # the whole story
 firstflight experiment --name kleidiai   # with LLAMA_BASELINE_BIN / LLAMA_KLEIDIAI_BIN set
 ```
 
-Or drive it from a laptop (WSL/Git Bash on Windows — needs `rsync`/`ssh`):
+Or drive it from a laptop (WSL/Git Bash on Windows; needs `rsync`/`ssh`):
 ```bash
 bash scripts/run_remote.sh --host ubuntu@<arm-ip> --key ~/.ssh/id_ed25519 --setup
 ```
 
 **Performix:** install `apx` on the box (learn.arm.com/install-guides/performix), then
 `firstflight profile`. Performix is free; the Linux arm64 package comes from
-`artifacts.tools.arm.com/arm-performix/app/latest/linux/arm64/` (a CLI-only build exists —
-right for headless VMs), ships the `apx` CLI, and requires accepting the license. Verify the
+`artifacts.tools.arm.com/arm-performix/app/latest/linux/arm64/` (a CLI-only build exists,
+which is the right one for headless VMs), ships the `apx` CLI, and requires accepting the license. Verify the
 install with `apx version`. Full support needs an Arm64 Linux target on Amazon Linux 2023 or
-Ubuntu 22.04/24.04 — the VM in this section (README's "Path B") qualifies; GitHub-hosted
+Ubuntu 22.04/24.04; the VM in this section (README's "Path B") qualifies. GitHub-hosted
 runners are ephemeral, so Performix profiling belongs here rather than in CI. First run may need the `TODO(confirm)` items in
 `docs/CONFIRM_ON_ARM.md` §1 checked against `apx` output.
 
 **Documenting the box:** before headline runs, Arm's own
 [`sysreport`](https://github.com/ArmDeveloperEcosystem/sysreport) prints how the server is
-configured for performance work (perf features, mitigations, governors) — one command, and its
-output alongside the results JSON makes the run's environment fully accountable.
+configured for performance work (perf features, mitigations, governors). Run it once and keep
+its output alongside the results JSON to document the run's environment.
 
 **OS tuning (AWS's own Graviton recommendations, all captured as run evidence):**
 - **Transparent hugepages:** `echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled`
@@ -148,11 +150,11 @@ output alongside the results JSON makes the run's environment fully accountable.
 
 ## E. Submission checklist
 
-**Accounts (both are listed entry steps in the Official Rules — neither provides compute):**
-- [ ] Devpost account + **Join Hackathon** clicked (this is what makes you able to submit)
-- [ ] Free **Arm Developer Program** account — <https://developer.arm.com/arm-developer-program>
+**Accounts (both are listed entry steps in the Official Rules; neither provides compute):**
+- [ ] Devpost account + **Join Hackathon** clicked (required to submit)
+- [ ] Free **Arm Developer Program** account: <https://developer.arm.com/arm-developer-program>
       (Rules §4 "How To Enter" walks through it: name/company/email/job title → verify email →
-      complete profile. ~2 minutes. It grants docs/labs/support, **not** cloud instances —
+      complete profile. ~2 minutes. It grants docs/labs/support, not cloud instances:
       there is no Arm-provided cloud environment or credits for this challenge.)
 
 **Project:**
@@ -163,15 +165,15 @@ output alongside the results JSON makes the run's environment fully accountable.
 - [ ] `arm-bench` workflow green and linked in the submission (judges can re-run it)
 - [ ] Demo video < 3 min following `docs/DEMO_SCRIPT.md`
 - [ ] The Devpost text description itself contains the Setup Instructions (build/run/validate)
-      and embedded before/after results as images — the rules let judges "judge based solely on
+      and embedded before/after results as images; the rules let judges "judge based solely on
       the text description, images, and video" (ready-to-paste section in `docs/DEVPOST.md`)
 - [ ] Repo stays public, free of charge, and the `arm-bench` workflow stays runnable through
-      the end of the Judging Period (**Aug 17 – Sep 4, 2026 4:00pm PT**) — don't archive,
+      the end of the Judging Period (**Aug 17 – Sep 4, 2026 4:00pm PT**); don't archive,
       rename, or make it private after submitting
 - [ ] Name the concrete Arm64 silicon + instance you benchmarked on in the write-up (e.g.
       "GitHub-hosted `ubuntu-24.04-arm` = Azure Cobalt 100 / Neoverse N2, 4 vCPU", or your
-      Graviton instance type) — the rules ask entrants to document their own test environment
-- [ ] Open the Devpost **"Enter a Submission"** form early and check its actual fields — it is
+      Graviton instance type); the rules ask entrants to document their own test environment
+- [ ] Open the Devpost **"Enter a Submission"** form early and check its actual fields; it is
       login-gated, so nobody can verify from outside whether it asks for anything extra
 - [ ] Remaining `docs/CONFIRM_ON_ARM.md` items resolved or consciously accepted
 
@@ -181,8 +183,8 @@ output alongside the results JSON makes the run's environment fully accountable.
 |---|---|
 | ``SKIP no llama.cpp `llama-…` binary found`` (any of cli/bench/server/batched) | Run `firstflight setup-engine` (or set `LLAMA_CPP_BIN`) |
 | `report rendering needs the [report] extra` | `pip install -e ".[report]"` |
-| `setup-engine failed: release asset not found` | The pinned tag rotated — pass `--tag b####` from the llama.cpp Releases page |
+| `setup-engine failed: release asset not found` | The pinned tag rotated; pass `--tag b####` from the llama.cpp Releases page |
 | Model download slow/interrupted | Re-run; downloads are atomic (`.part` then rename), cached in `models/` |
 | PowerShell won't run `activate` | `Set-ExecutionPolicy -Scope Process Bypass`, or call `.\.venv\Scripts\<tool>.exe` directly |
-| Tests can't find modules | You're outside the venv — reactivate or use the venv's `python -m pytest` |
+| Tests can't find modules | You're outside the venv; reactivate or use the venv's `python -m pytest` |
 | Old llama.cpp build hangs on generation | Fixed in the harness (stdin closed); if driving llama-cli manually, redirect stdin from null |

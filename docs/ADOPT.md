@@ -23,7 +23,7 @@ Then: `firstflight bench --model my-model --variant q4_0` (pick a workload with
 
 ## 2. Benchmark YOUR instance
 
-Add it to `configs/instances.yaml` so $/M-token costs are priced honestly:
+Add it to `configs/instances.yaml` so $/M-token costs are computed from a real price:
 
 ```yaml
   my-instance:
@@ -43,8 +43,8 @@ workflow: free `ubuntu-24.04-arm` runner, the three-build attribution ladder (ge
 armv8-a floor / native+repack default / KleidiAI), cached builds keyed on the llama.cpp
 tag, and your benchmark step where the placeholder is. Drop it into
 `.github/workflows/`, replace the `RUN YOUR BENCHMARK HERE` step, push to a public repo,
-dispatch. The three-build pattern is the part worth stealing: a plain Release build is
-**not** a baseline (`GGML_NATIVE` and `GGML_CPU_REPACK` default ON), so build the generic
+dispatch. The three-build pattern is the important part: a plain Release build is
+not a baseline (`GGML_NATIVE` and `GGML_CPU_REPACK` default ON), so build the generic
 floor explicitly or your before/after attributes someone else's optimization to your change.
 
 ## 4. Reuse the measurement rules
@@ -55,10 +55,10 @@ The short version of [`METHODOLOGY.md`](METHODOLOGY.md), portable to any harness
   heuristic can't differ between arms.
 - Interleave rounds (A,B,A,B) instead of blocking (A,A,B,B); report the median and the
   between-round spread.
-- Run a **noise floor**: the same config twice under two labels. If your "win" is inside
-  that spread, it isn't a win.
+- Run a **noise floor**: the same config twice under two labels. If your measured win is
+  inside that spread, don't claim it.
 - Prove kernel activation from the load log (`CPU_KLEIDIAI` buffer line), never from the
   build flag.
 - Pair every speedup with a quality guardrail (exact-match probe + perplexity on a fixed
   corpus).
-- Price tokens with a dated, real hourly price — or `0.0` and say so.
+- Price tokens with a dated, real hourly price, or `0.0` and say so.

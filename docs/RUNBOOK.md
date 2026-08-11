@@ -132,6 +132,11 @@ Ubuntu 22.04/24.04 — the VM in this section (README's "Path B") qualifies; Git
 runners are ephemeral, so Performix profiling belongs here rather than in CI. First run may need the `TODO(confirm)` items in
 `docs/CONFIRM_ON_ARM.md` §1 checked against `apx` output.
 
+**Documenting the box:** before headline runs, Arm's own
+[`sysreport`](https://github.com/ArmDeveloperEcosystem/sysreport) prints how the server is
+configured for performance work (perf features, mitigations, governors) — one command, and its
+output alongside the results JSON makes the run's environment fully accountable.
+
 **OS tuning (AWS's own Graviton recommendations, all captured as run evidence):**
 - **Transparent hugepages:** `echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled`
   (or run `ENABLE_THP=1 bash scripts/setup_arm_vm.sh`). The harness records the active THP

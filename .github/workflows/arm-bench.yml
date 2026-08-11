@@ -72,7 +72,9 @@ jobs:
         run: rm -f bench/results/example_*.json bench/results/profile_example.json
 
       - name: Smoke (real inference on Arm)
-        run: firstflight smoke
+        # Shared runners have slow-I/O days: cold-loading the 470MB model can exceed the
+        # 90s local default (observed run #6, download at 5-8MB/s). 300s absorbs that.
+        run: firstflight smoke --timeout 300
 
       - name: Baseline prefill sweep (light workload — this job runs on every push)
         run: firstflight bench --label baseline --workload rag-context --repetitions 2

@@ -20,9 +20,10 @@ python -m venv .venv
 # 2. Install with report + dev extras
 pip install -e ".[report,dev]"
 
-# 3. Unit tests + lint (expect 90+ passed, ruff clean)
+# 3. Unit tests + lint (expect 100+ passed; the same two ruff checks CI runs)
 pytest
 ruff check .
+ruff format --check .
 
 # 4. Get a real llama.cpp (prebuilt for YOUR platform, no compiler)
 firstflight setup-engine
@@ -90,11 +91,14 @@ Each `vN/README.md` says exactly what that stage adds.
    appears in the run's Summary tab). Note smoke-arm is path-filtered — it runs only when
    `src/`, `configs/`, or the workflow file change (a docs-only commit skips it).
 
-4. **The headline run (one click):** GitHub → Actions → **arm-bench** → *Run workflow*.
-   This dispatches **kleidiai-before-after**: builds llama.cpp three ways (baseline,
-   `-DGGML_CPU_KLEIDIAI=ON`, `-mcpu=native`), runs the before/after experiment + quality guardrail +
-   KleidiAI-active detection + the quant sweep, and renders the report **into the run summary**.
-   The standalone HTML report + JSON results are attached as the `arm-headline-*` artifact.
+4. **The headline run:** GitHub → Actions → **arm-bench** → *Run workflow*.
+   This dispatches **kleidiai-before-after**: builds llama.cpp three ways (generic armv8-a
+   floor / native+repack default / KleidiAI), runs the attribution ladder (3 interleaved
+   rounds) + noise-floor control + quality guardrail + perplexity + KleidiAI-active detection
+   + the quant sweep, and renders the report **into the run summary**. The standalone HTML
+   report + JSON results are attached as the `arm-headline-*` artifact.
+   *(No write access to the repo? Fork it, enable workflows on the fork when GitHub asks,
+   and dispatch there — `Run workflow` needs write permission.)*
 
 5. **Promote the real numbers:** download that artifact, copy its report + results over
    `bench/reports/` / `bench/results/` (replacing the synthetic sample), update the README

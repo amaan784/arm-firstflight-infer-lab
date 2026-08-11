@@ -39,7 +39,11 @@ top-level JSON array of per-test rows (schema confirmed against
 - **Peak memory** is the benchmarked child's peak RSS, measured **per child** by wrapping the
   run in GNU `time -v` (`Maximum resident set size`, `bench/memory.py`) so each config gets its
   own attribution; `resource.getrusage(RUSAGE_CHILDREN)` is the fallback where GNU time is
-  absent (that high-water mark spans all children, so it is labeled as such).
+  absent (that high-water mark spans all children, so it is labeled as such). Benchmark sweeps
+  run with `-mmp 0` (mmap off; flag verified on the real b9873 binary 2026-08-09), so peak RSS
+  is honest allocated memory rather than lazily-paged file mappings — at some model-load-time
+  cost outside the timed regions. Sweeps also set `--prio 2` and `--delay 2` (steadier numbers
+  on shared runners). Treat peak RSS as capacity context, not a tuned metric.
 
 llama-bench sweeps over prompt sizes and threads are also Arm's own prescribed cloud
 benchmarking method — Arm's Graviton4/Axion Learning Paths run e.g.
@@ -71,7 +75,22 @@ thousands of tokens to dozens, and `prompt_ms` with it. Both turns are reported 
   `warmup` field in configs/workloads.yaml is informational, not an executed count.
 - **Repeats + variance.** `repeats` timed runs per config (default 5). We report llama-bench's
   mean (`avg_ts`) **± stddev** across repetitions, never a single cherry-picked number.
-- **Fixed seed.** Generation uses a fixed seed for run-to-run comparability.
+- **A measured noise floor, and a gate that uses it.** The `noise-floor` experiment runs the
+  *same build with the same config* under two labels. Any apparent speedup between them is the
+  machine talking, not the treatment, so that spread is the bar a real delta must clear. The
+  report computes it and **refuses to headline a speedup that sits inside it** — printing
+  "within noise / not claimed" instead of a multiplier. A harness that can't report *no win*
+  isn't measuring, it's advertising.
+- **Interleaved rounds (`experiment --rounds N`).** Repeats inside one llama-bench process
+  share cache/allocator state and can't see slow drift. Rounds re-run the whole config list
+  round-robin (A,B,C,A,B,C,...); the report takes the **median per rung** and shows the
+  **between-round spread** — the error bar that matters on a shared runner. CI runs the
+  headline ladder with 3 rounds.
+- **Noise floor (`noise-floor` experiment).** The same build measured twice under two labels.
+  Its apparent "speedup" is pure runner noise (co-tenancy, thermals) and is published next to
+  the headline — the yardstick a real delta must clear.
+- **Fixed seed.** llama-cli paths (smoke, quality probe) pin seed 42 + greedy decoding;
+  llama-bench itself takes no seed flag (its measurement is timing, not sampling).
 - **Pinned environment.** llama.cpp pinned to a specific `b####` release tag; deps pinned in
   `pyproject.toml`; reproducible image in `docker/Dockerfile.arm64`. Our pin (b9873) is newer
   than the tag Arm's own KleidiAI build documentation last tested (b7610 — "Newer versions
@@ -91,9 +110,14 @@ Holding model + instance fixed, we compare:
    verified against the real b9873 binary; flash-attn pinned on for both) (`kv-cache`).
 4. **Prefill micro-batch** — `-ub` 256/512/1024/2048 (`prefill-batch`) and **flash attention**
    on/off (`flash-attn`).
-5. **Build targeting** — default build vs `-mcpu=native`, the official AWS/Arm recipe
-   (`build-flags`).
-6. **KleidiAI on vs off** — baseline llama.cpp build vs `-DGGML_CPU_KLEIDIAI=ON` (`kleidiai`).
+5. **Build targeting** — a generic armv8-a floor (`GGML_NATIVE=OFF`, `GGML_CPU_REPACK=OFF`)
+   vs the native default (`build-flags`). A plain Release build already carries the
+   `-mcpu=native`-equivalent that the official AWS/Arm recipe prescribes — `GGML_NATIVE`
+   defaults ON (verified in b9873's ggml/CMakeLists.txt, 2026-08-08) — so default-vs-native
+   would be native-vs-native and measure only noise.
+6. **KleidiAI attribution ladder** — generic floor → ggml's own aarch64 **repack** kernels
+   (`GGML_CPU_REPACK`, ON by default: the named, controlled middle rung) → `-DGGML_CPU_KLEIDIAI=ON`
+   (`kleidiai`). Every rung is a distinct mechanism, so each delta has one cause.
 7. **Prompt/prefix caching** — llama-server `cache_prompt` + `--cache-reuse` (measured by
    `firstflight ttft`, not llama-bench).
 
@@ -116,6 +140,15 @@ accuracy. Two paths:
 
 - **Built-in probe (default):** a small fixed exact-match Q&A set run through `llama-cli` —
   self-contained, no torch, runs on the bench box. A regression guardrail, not a leaderboard.
+  Scoring matches whole words in the **first line** of the completion only (a rambling model
+  must not get extra chances to hit the gold string). Honest limits: at n=40 the 95% binomial
+  interval is roughly ±12 points around 80%, so the probe catches *collapse*, not a 1-2%
+  drift — and in the KleidiAI ladder all rungs load the *identical* Q4_0 file, so the probe
+  is flat there by construction. That's what perplexity is for:
+- **Perplexity (`firstflight perplexity` / automatic in experiments):** `llama-perplexity`
+  over a fixed corpus (default: this repo's own docs — identical text across the configs
+  being compared, which is all a relative delta needs). Resolves the ~1% shifts the probe
+  can't; reported per config as `ppl` in the runs table, lower = better.
 - **lm-evaluation-harness (optional, `[eval]` extra):** for a real MMLU/GSM8K subset, start a
   `llama-server` and point lm-eval at it with `--model local-chat-completions` (the default;
   `local-completions` targets the raw completion endpoint) (the light
@@ -153,6 +186,24 @@ with a clear message and the report omits the section.
 `TODO(confirm)` on the live box (the official CLI Reference Guide, doc 111566, is a JS-rendered
 SPA): the exact JSON keys for `run_id`/`session_id` and whether `recipe run --json` already
 embeds the hotspot table. The **commands** above come from Arm's own tooling, not invention.
+
+## The negative control
+
+`kleidiai-null-control` deliberately runs the KleidiAI build against a **Q4_K_M** model, which
+its kernels cannot accelerate — upstream llama.cpp logs exactly that
+([PR #25701](https://github.com/ggml-org/llama.cpp/pull/25701), merged 2026-07-21). The probe
+must come back **KleidiAI inactive** for that row, and any timing difference must therefore
+*not* be attributed to KleidiAI. It is a test of the instrument rather than of the silicon: if
+this control ever reports KleidiAI active on a k-quant, the detection is broken and every other
+KleidiAI claim in the report is void.
+
+## Both quants, because the mechanism differs
+
+The ladder runs at **Q4_0** (`kleidiai`) and again at **Q8_0** (`kleidiai-q8_0`). ggml's own
+aarch64 repack path targets Q4_0, so on that quant the `repack` rung already captures most of
+the available headroom and KleidiAI's own contribution looks small. Q8_0 leaves KleidiAI's
+kernels room to show a clean delta. Reporting one quant alone would make the mechanism look
+like whichever story that quant happened to tell.
 
 ## Honest limitations
 

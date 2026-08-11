@@ -24,90 +24,97 @@ report** anyone can reproduce with one click on a free Arm CI runner.
 
 ## 2. The absolute basics (start here if any term below is new)
 
-**What is an LLM?** A large language model (like the ones behind ChatGPT or Claude) is a
-giant grid of numbers — billions of "weights" — that, given some text, predicts what text
-should come next. That's all it does, extremely well.
+**What is an LLM?** A large set of numbers, called weights, that takes some text and predicts
+what text comes next. Repeat that prediction and you get an answer. The models used here have
+between 0.5 and 1.5 billion weights.
 
-**What is a token?** Models don't read letters or whole words; they read **tokens** — text
-chopped into LEGO-brick pieces, roughly ¾ of a word each ("optimization" might be
-`optim`+`ization`). "32,000 tokens of context" ≈ a 24,000-word document. Every speed number
-in this project is *tokens per second*.
+**What is a token?** Models process text in chunks of roughly four characters, called tokens.
+"optimization" is likely two of them. As a rule of thumb 1,000 tokens is about 750 words, so a
+32,000-token prompt is roughly a 24,000-word document. Every speed number in this project is
+tokens per second.
 
-**Training vs inference.** Training is *writing* the cookbook (done once, on thousands of
-GPUs, costs millions). **Inference is cooking from it** — running the finished model to
-answer a prompt. This project is entirely about inference.
+**Training vs inference.** Training produced the model: once, on a large GPU cluster, at great
+expense. Inference is running that finished model to answer a prompt, which then happens
+millions of times and is where the ongoing cost lives. This project only concerns inference.
 
-**Why run inference on a CPU — aren't GPUs the thing?** GPUs are fastest, but they're
-expensive, scarce, and overkill for many jobs. A plain cloud CPU server is cheap, always
-available, and plenty for small/medium models — *if* you tune it. Arm CPUs (what this
-project targets) are the cheapest watts in the cloud, which is why AWS, Google, and
-Microsoft all built their own Arm chips.
+**Why a CPU and not a GPU?** GPUs are faster but expensive and often supply-constrained, and
+many production workloads don't need one. Small and mid-size models run acceptably on ordinary
+cloud CPU servers, which are cheap and always available. Arm server CPUs give the best
+performance per dollar in that category, which is why AWS, Google and Microsoft each designed
+their own rather than buying someone else's.
 
-**Cores, threads, and the kitchen analogy.** A CPU has several **cores** (independent
-workers). A program runs **threads** (tasks) across them. Picture a restaurant kitchen:
-cores are cooks, threads are jobs assigned to cooks. Two things limit the kitchen:
-- **Compute-bound**: the cooks' hands are the bottleneck — more/faster cooks help.
-- **Memory-bandwidth-bound**: the cooks are fast but the *waiters can't bring ingredients
-  from the pantry fast enough* — adding cooks changes nothing; shrinking the ingredients
-  (so more fits per trip) is what helps.
+**Compute-bound vs memory-bound.** A CPU does arithmetic far faster than it can fetch data from
+memory, so any piece of work is limited by one or the other, and which one decides what will
+speed it up:
+- **Compute-bound**: the data is already in cache and the processor simply has a lot of maths to
+  do. Faster instructions and more cores help.
+- **Memory-bound**: the processor sits idle waiting for weights to arrive from RAM. Adding cores
+  achieves nothing; making the data smaller does.
 
-Keep that pair in mind — it explains nearly every optimization here.
+This distinction determines which optimization applies where, so it is worth holding onto.
 
-**What does "compiling" and a "build flag" mean?** llama.cpp is C++ source code; you
-**compile** ("build") it into an executable program. A **build flag** is an option you pick
-at compile time — like ordering the same car model with or without the turbo. Same source,
-different engine inside. Our headline optimization is literally one build flag
-(`-DGGML_CPU_KLEIDIAI=ON`).
+**Compiling and build flags.** llama.cpp ships as C++ source that you compile into an
+executable. A build flag is an option given to the compiler that changes which code ends up in
+that executable: same source, different machine code. The optimization at the centre of this
+project is one flag, `-DGGML_CPU_KLEIDIAI=ON`.
 
-**What is a benchmark, and why the ritual?** A benchmark is a stopwatch experiment. The
-rules exist because computers are noisy: **warm-up runs** are discarded (first lap on cold
-tires doesn't count), we **repeat several times** (default 5 for the full prefill sweep,
-3 for the experiment suite) and report the spread (one lucky run proves
-nothing), and we **change exactly one thing at a time** on the **same machine** (otherwise
-you don't know what caused the difference).
+**What is a benchmark, and why the protocol?** A timing experiment. The rules exist because a
+shared cloud server is a noisy place to measure anything. Warm-up runs are discarded, because the
+first run pays for cache misses and page faults the later ones don't. Measurements are repeated
+(5 for the full prefill sweep, 3 for the experiment suite) and the spread is reported alongside
+the value. Exactly one variable changes at a time, on the same machine, or you cannot say what
+caused a difference.
 
-**What is a cache?** A small fast scratchpad that saves you re-doing slow work. Your browser
-caches images; the model caches its reading of the conversation so far (the *KV-cache*,
-§3) — like sticky notes summarizing every page you've read, so writing the next word never
-requires re-reading the whole book.
+**What is a cache?** Fast storage that avoids repeating slow work. Relevant here twice: the CPU's
+own caches hold recently used data close to the cores, and the model keeps a **KV-cache** (§3) of
+intermediate values for tokens it has already read, so producing each new word doesn't require
+reprocessing the whole conversation.
 
-**What are pip, a venv, and an "editable install"?** `pip` installs Python packages. A
-**venv** (virtual environment) is a clean, project-private toolbox so different projects'
-package versions don't clash. `pip install -e .` installs *this* repo into the venv in
-"editable" mode — code changes take effect without reinstalling.
+**pip, venv, editable install.** `pip` installs Python packages. A **venv** is a project-private
+environment so different projects' package versions don't conflict. `pip install -e .` installs
+this repo into that environment in editable mode, so code changes take effect without
+reinstalling.
 
-**What is CI / GitHub Actions?** A robot computer that runs your checks automatically on
-every change. GitHub offers hosted runner machines — including **free Arm machines** for
-public repos, which is how judges can reproduce our benchmarks with one click, no hardware.
+**What is CI / GitHub Actions?** A service that runs commands on GitHub's machines automatically.
+GitHub provides Arm-based machines free for public repositories, which is how anyone can
+reproduce these benchmarks without owning Arm hardware.
 
-**What is a profiler?** A stopwatch-with-clipboard that watches a running program and
-reports *where the time actually went*, function by function. Ours is Arm's **Performix**.
+**What is a profiler?** A tool that samples a running program and reports which functions consumed
+the time. Arm's is called Performix.
 
 ## 3. The project's core concepts
 
 ### Inference, prefill, and generation
 Running an LLM has two phases with totally different characters:
 
-- **Prefill (prompt processing):** the model reads your entire prompt *before it can say
-  anything*. All prompt tokens can be processed in parallel — big matrix-matrix multiplies —
-  so prefill is **compute-bound** (the cooks' hands are the limit).
-- **Generation (decode):** the model then produces output one token at a time. Each step
-  reuses cached state and does thinner matrix-vector work — generation is mostly
-  **memory-bandwidth-bound** (the waiters are the limit).
+- **Prefill (prompt processing):** the model must process the entire prompt before it can emit
+  anything. All prompt tokens are handled at once, as large matrix-matrix multiplications, so
+  the processor is doing dense arithmetic. Prefill is **compute-bound**.
+- **Generation (decode):** output then comes out one token at a time. Each step does
+  comparatively little arithmetic but must read the weights from memory again, so generation is
+  **memory-bound**.
 
-**TTFT ≈ prompt_tokens ÷ prefill_speed.** That's the derivation the whole harness pivots on
-(`bench/prefill.py:ttft_seconds`). A 32,768-token prompt at 520 tokens/sec of prefill ≈
-**63 seconds of silence** before the first word. Speed up prefill 1.54× (the demo headline)
-and the silence drops to ≈41 s. That's why we sweep context lengths (128 → 32k) — to make the scaling curve, not
-just one number, visible. (Why do long prompts hurt *worse than linearly*? Attention — the
-mechanism where every token looks at every earlier token — grows with the square of length.)
+**TTFT ≈ prompt_tokens ÷ prefill_speed**, the derivation the harness pivots on
+(`bench/prefill.py:ttft_seconds`). At 520 tokens/sec, a 32,768-token prompt takes about 63
+seconds before the first word appears; make prefill 1.5× faster and the same request starts
+answering in about 42 seconds, with the same model on the same machine.
+
+Doubling the prompt length more than doubles that cost: attention compares every token with
+every earlier token, so the work grows with the square of the length. A single number at one
+context length therefore says very little, which is why the harness sweeps 128 → 32k and reports
+the curve.
 
 ### Why Arm / Neoverse
 **Neoverse** is Arm's server-CPU family: Graviton2 = Neoverse-N1, Graviton3 = V1,
-Graviton4 = V2. Cloud vendors love them for price/efficiency, so a growing slice of LLM
-serving happens there. Arm cores carry special matrix instructions — **DOTPROD**, **i8mm**
-(int8 matrix-multiply), and newer **SME/SME2** — think of them as a built-in food processor
-that generic code never switches on. Switching them on is the whole opportunity here.
+Graviton4 = V2, Graviton5 = V3; Azure Cobalt 100 = N2, Google Axion = V2 (C4A) / N3 (N4A).
+Cloud vendors love them for price/efficiency, so a growing slice of LLM serving happens there.
+Arm cores include instructions that do many arithmetic operations at once instead of one at a
+time: **DOTPROD**, **i8mm** (int8 matrix-multiply), **BF16**, and the **SVE/SVE2** vector
+extensions. Ordinary compiled code often doesn't use them; optimized kernels do. Getting the
+kernels that use them is the whole opportunity here.
+(**SME/SME2**, Arm's newer matrix extension, is *client* silicon only today — phones and
+Apple Macs. No shipping Neoverse server core implements it, so it is not part of this story;
+verified against Arm's own SME2 device list and AWS's Graviton feature table, 2026-08-09.)
 
 ### llama.cpp, GGUF, and the tools
 - **llama.cpp** — the standard open-source C++ engine for running LLMs on CPUs. We drive it,
@@ -119,10 +126,10 @@ that generic code never switches on. Switching them on is the whole opportunity 
   We parse `avg_ts` (mean tokens/sec) and `stddev_ts` (spread across repeats) from it.
 
 ### Quantization (the Q4_0 / Q4_K_M / Q8_0 zoo)
-Model weights are natively 16-bit numbers. **Quantization** stores them with fewer bits —
-like writing 3.14159265 as 3.14: the notebook gets much smaller, reading it gets faster,
-and you accept a tiny rounding error. Fewer bits = less RAM, less memory traffic (smaller
-ingredients per waiter trip!), faster math:
+Model weights are stored as 16-bit numbers. **Quantization** stores them in fewer bits, the way
+writing 3.14 instead of 3.14159265 keeps most of the value in less space. A 1.5B-parameter model
+is about 3 GB at 16 bits and under 1 GB at 4 bits. Fewer bits means less RAM, less memory traffic,
+and faster arithmetic, in exchange for a small rounding error in the weights:
 - **Q8_0**: 8 bits/weight. Nearly lossless, biggest of the three.
 - **Q4_0**: 4 bits/weight, simple blocks. Small and fast, slightly lossier.
 - **Q4_K_M**: 4-bit "k-quant" — cleverer packing, usually better accuracy than Q4_0, and the
@@ -136,37 +143,38 @@ experiment + quality probe prove what that choice costs and buys.
 ### KleidiAI (optimization #1, the headline)
 **KleidiAI** is Arm's library of hand-tuned matrix **microkernels** — tiny routines written
 by Arm's engineers to do one operation (matrix multiply) as fast as this exact silicon
-allows, using DOTPROD/i8mm/SME2. llama.cpp integrates it behind the build flag
+allows. It picks the best available kernel at runtime, preferring SME2 → i8mm → dotprod; on a
+Neoverse server the SME2 tier never fires (no server core has SME), so the win comes from the
+i8mm/dotprod kernels. llama.cpp integrates it behind the build flag
 `-DGGML_CPU_KLEIDIAI=ON`. At model load it **repacks** Q4_0/Q8_0 weights once into a
-cache-friendly layout (reorganizing the pantry so every trip grabs exactly what the recipe
-needs), then routes matmuls through the fast paths. Same model file, same commands —
-different machine code underneath. Because it's a *build-time* flag, our before/after
-compares **two llama.cpp builds** (the CI job compiles both — plus a third `-mcpu=native`
-build for the build-flags axis). And because "we
+layout its kernels can read efficiently, then routes the matrix multiplications through the fast
+paths. Same model file, same commands, different machine code underneath. Because it's a *build-time* flag, our before/after
+compares **llama.cpp builds** (the CI job compiles the full ladder: a generic armv8-a floor,
+the native default with ggml's own aarch64 repack kernels, and the KleidiAI build). And
+because "we
 compiled with the flag" ≠ "the kernels actually ran", the harness **proves activation**:
 when KleidiAI is live, the load log prints `load_tensors: CPU_KLEIDIAI model buffer size…` —
 we grep for it (`detect_kleidiai`) and print yes/no in the report's `kleidiai` column.
 
 ### Thread pinning (optimization #3)
-More threads ≠ more speed forever (the waiters saturate), and the OS scheduler bounces
-threads between cores, trashing each core's warmed-up cache — like cooks forced to swap
-stations mid-recipe, re-fetching all their tools. `llama-bench -C 0x0f --cpu-strict 1`
+More threads stop helping once memory bandwidth is the limit, and the OS scheduler moves threads
+between cores, which leaves each thread on a core whose cache no longer holds its data.
+`llama-bench -C 0x0f --cpu-strict 1`
 **pins** threads to fixed cores (the hex mask picks which). The thread-sweep and pinning
 experiments measure both effects.
 
 ### KV-cache, and quantizing it (optimization #4)
-During generation the model keeps a **KV-cache** — the sticky notes: stored "keys/values"
-for every token seen so far, so each new word doesn't recompute the past. At long context
-the sticky-note pile gets *huge*, and moving it competes for the same memory bandwidth as
-the weights. `llama-bench -ctk q8_0 -ctv q8_0` writes the notes in 8-bit shorthand instead
-of 16-bit — **half the footprint and traffic** — exactly the pressure point on Neoverse at
-long context. The kv-cache experiment measures f16 vs q8_0, with the quality probe watching
+During generation the model keeps a **KV-cache**: stored "keys" and "values" for every token
+seen so far, so each new word doesn't recompute the past. At long context that store becomes
+large, and moving it competes for the same memory bandwidth as the weights.
+`llama-bench -ctk q8_0 -ctv q8_0` stores it at 8 bits instead of 16, **halving its footprint and
+traffic**, which is exactly the pressure point on Neoverse at long context. The kv-cache experiment measures f16 vs q8_0, with the quality probe watching
 for accuracy cost.
 
 ### Prefix caching, and measured vs derived TTFT
-The sticky notes unlock one more trick: if two requests share a long **prefix** (the same
-system prompt or RAG context), the server can keep the prefix's notes and only read the part
-that changed. That's **prompt/prefix caching** — llama-server does it by default
+The KV-cache enables one more optimization: when two requests share a long **prefix** (the same
+system prompt, or the same retrieved document), the server can keep that portion of the cache and
+process only the part that differs. That's **prompt/prefix caching** — llama-server does it by default
 (`cache_prompt`), and `--cache-reuse` extends it to near-matches. For agent/RAG serving this
 is the biggest honest TTFT lever there is: the first ("cold") turn pays full prefill; every
 following ("warm") turn processes only the new question. `firstflight ttft` demonstrates it —
@@ -263,7 +271,7 @@ Design rules that shaped everything:
   one-click reproducibility — the parts that turn a timing into evidence.
 - *"Why is Q4_K_M slower than Q4_0 here? Isn't K-quant better?"* — Better accuracy per bit,
   yes — but KleidiAI doesn't accelerate k-quants, so on Neoverse Q4_K_M runs on generic
-  kernels while Q4_0 gets the i8mm/SME2 path. That trade (and its accuracy cost) is exactly
+  kernels while Q4_0 gets the i8mm/dotprod path. That trade (and its accuracy cost) is exactly
   what the quant-sweep + quality probe quantify.
 - *"How do I know KleidiAI actually kicked in?"* — The `kleidiai` column: the harness greps
   the load log for the `CPU_KLEIDIAI` buffer marker at runtime. No marker, no claim.
@@ -275,7 +283,7 @@ Design rules that shaped everything:
 
 | Term | Meaning |
 |---|---|
-| **Token** | The LEGO brick of text a model reads/writes; ≈ ¾ of a word |
+| **Token** | A chunk of text a model processes, about four characters; 1,000 tokens ≈ 750 words |
 | **LLM** | Large language model — billions of weights predicting the next token |
 | **Inference** | Running a trained model (vs training = creating it) |
 | **Prefill** | Reading the whole prompt before answering; parallel, compute-bound |
@@ -283,21 +291,22 @@ Design rules that shaped everything:
 | **TTFT** | Time-to-first-token: the silence before the first word ≈ prompt ÷ prefill speed |
 | **Context length** | How many tokens of prompt/history the model is fed |
 | **tokens/sec (tok/s)** | The universal speed unit here; `avg_ts` in llama-bench output |
-| **Compute-bound** | Limited by CPU math speed (the cooks) |
-| **Memory-bandwidth-bound** | Limited by RAM traffic (the waiters) |
+| **Compute-bound** | Limited by how fast the CPU can do arithmetic |
+| **Memory-bandwidth-bound** | Limited by how fast data arrives from RAM |
 | **llama.cpp** | The standard C++ engine for LLM inference on CPUs |
 | **GGUF** | llama.cpp's single-file model format |
 | **llama-bench / llama-cli** | llama.cpp's benchmarker / text-generation binary |
 | **Quantization** | Storing weights in fewer bits (3.14159 → 3.14): smaller, faster, tiny error |
 | **Q4_0 / Q8_0** | Simple 4-bit / 8-bit quant formats — the ones KleidiAI accelerates |
 | **Q4_K_M** | Smarter 4-bit "k-quant"; common default; **not** KleidiAI-accelerated |
-| **KV-cache** | Sticky notes of everything read so far, reused every generation step |
-| **Prefix/prompt caching** | Re-using the sticky notes for a shared prompt prefix — warm turns skip almost all prefill (`cache_prompt`, `--cache-reuse`) |
+| **KV-cache** | Stored intermediate values for tokens already read, reused each generation step |
+| **Prefix/prompt caching** | Reusing the KV-cache for a shared prompt prefix, so warm turns skip almost all prefill (`cache_prompt`, `--cache-reuse`) |
 | **llama-server** | llama.cpp's HTTP server; its `/completion` response includes measured `timings` (our measured TTFT) |
 | **-ctk / -ctv** | llama-bench flags setting the KV-cache storage type (f16 → q8_0 halves it) |
 | **KleidiAI** | Arm's hand-tuned matmul microkernels; enabled by `-DGGML_CPU_KLEIDIAI=ON` |
 | **Microkernel** | A tiny routine hand-written to do one operation optimally on one chip |
-| **DOTPROD / i8mm / SME2** | Arm matrix instructions — the built-in food processor |
+| **DOTPROD / i8mm / SVE2** | Arm vector and matrix instructions available on Neoverse servers |
+| **SME2** | Arm's newer matrix extension. Client silicon only (phones, Apple Macs); not on any Neoverse server core as of 2026-08 |
 | **Neoverse** | Arm's server-CPU family (Graviton2=N1, Graviton3=V1, Graviton4=V2) |
 | **Graviton / Axion / Cobalt** | AWS / Google / Microsoft's Arm server chips |
 | **Thread pinning / affinity** | Fixing threads to specific cores (`-C mask --cpu-strict`) |

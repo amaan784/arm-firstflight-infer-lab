@@ -1,8 +1,14 @@
 # Arm FirstFlight — Inference Optimization Lab
 
-> Reproducible benchmark **+** optimization harness for CPU LLM inference on **Arm Neoverse**
-> cloud servers — focused on the metric agentic/RAG apps actually feel: **time-to-first-token
-> (TTFT) / prefill latency on long contexts**.
+> ### Your KleidiAI speedup is measured against the wrong baseline.
+>
+> A stock llama.cpp build already has Arm acceleration switched on — `GGML_NATIVE` and
+> `GGML_CPU_REPACK` both default to ON. So the standard "KleidiAI on vs off" test credits
+> KleidiAI with work ggml's own aarch64 kernels were already doing. And on Q4_K_M, the quant
+> most people actually download, KleidiAI's kernels never engage at all.
+>
+> **FirstFlight builds the real floor, splits the speedup by mechanism, proves the kernels ran
+> — and refuses to report a win it can't defend.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 <!-- After pushing, replace OWNER/REPO and uncomment:
@@ -10,38 +16,76 @@
 [![arm-bench](https://github.com/OWNER/REPO/actions/workflows/arm-bench.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/arm-bench.yml)
 -->
 
-`firstflight` profiles a workload (with **Arm Performix**), applies **Arm-specific
-optimizations** (KleidiAI int4 kernels, thread pinning/affinity, quantization schemes,
-KV-cache settings), and **auto-generates a one-page before/after report** with tokens/sec,
-TTFT, peak memory, a small quality-delta eval, and **cost per million tokens**.
-
 Built for the **Arm Create: AI Optimization Challenge (Cloud AI track)**.
-
-> **Status: feature-complete.** `setup-engine` (auto-fetch prebuilt llama.cpp for ANY platform)
-> → `smoke` → `bench` (prefill/TTFT sweep) → `ttft` (measured prompt-cache TTFT) →
-> `throughput` (concurrency) → `profile` (Arm Performix hooks) → `experiment` (8 before/after
-> experiments + quality eval) → `report` (standalone HTML). **One click in CI** runs the whole
-> evidence suite on a free Arm runner and renders the report straight into the run summary. Off-Arm, Arm-only tools degrade
-> gracefully and say what is skipped. A sample report lives in [`bench/reports/`](bench/reports/)
-> — illustrative **synthetic** data until a real Arm run lands.
 
 ---
 
 ## 1. Project Overview
 
-> **Headline (illustrative example — synthetic perf data, real instance price):** **1.54× faster
-> prefill at a 32k-token context** — TTFT **63.0s → 41.0s**, prompt-token cost **\$0.170 →
-> \$0.111 per million** (generation: \$1.61 → \$1.04, at the real c8g.2xlarge \$0.319/hr), with
-> **quality held (32/40 → 32/40)** — by switching to a **KleidiAI Q4_0** build, with KleidiAI
-> **proven active** via load-log detection. _Real numbers: run the `arm-bench` workflow's
-> **kleidiai-before-after** job (free Arm runner, report lands in the run summary) or `make
-> bench && make report` on an Arm box. Regenerate this example with `make report-demo`._
+### The problem with the standard benchmark
 
-![Prefill TTFT vs context length — illustrative synthetic example](bench/reports/headline-prefill-ttft.png)
+Everyone measures KleidiAI the same way: build llama.cpp normally, build it again with
+`-DGGML_CPU_KLEIDIAI=ON`, compare. That test is **not measuring what it claims to measure**,
+for two reasons that are checkable in five minutes:
+
+1. **The "before" build is already Arm-optimized.** In llama.cpp's own `ggml/CMakeLists.txt`,
+   `GGML_NATIVE` defaults **ON** (native targeting, the `-mcpu=native`-equivalent) and
+   `GGML_CPU_REPACK` defaults **ON** (ggml's own aarch64 Q4_0 repack GEMM — the same trick
+   KleidiAI does). So the comparison is one Arm optimization against another, and whatever
+   number falls out gets credited entirely to KleidiAI.
+2. **On the most-downloaded quant, the kernels never run.** KleidiAI has kernels for Q4_0 and
+   Q8_0 only. Point it at a Q4_K_M GGUF — the default almost everyone downloads — and it
+   silently falls back. Upstream now logs exactly that
+   ([PR #25701](https://github.com/ggml-org/llama.cpp/pull/25701), merged 2026-07-21).
+
+### What this harness does instead
+
+It builds the **true unaccelerated floor** (`GGML_NATIVE=OFF`, `GGML_CPU_ARM_ARCH=armv8-a`,
+`GGML_CPU_REPACK=OFF`) and measures a **three-rung ladder** against it, so every speedup names
+its own mechanism:
+
+```
+generic armv8-a  →  + native targeting & ggml repack  →  + KleidiAI kernels
+```
+
+Then it does three things a benchmark normally won't:
+
+- **Proves the kernels engaged** — reads the weight-buffer line and ISA flags out of the real
+  model-load log, and names the tier that ran (I8MM / DOTPROD / SVE2 / NEON). No marker, no claim.
+- **Runs a negative control** — the KleidiAI build against Q4_K_M, where its kernels *cannot*
+  engage. The probe must report INACTIVE. If it ever doesn't, the detection is broken and every
+  other KleidiAI number here is void.
+- **Refuses to claim wins inside its own noise.** The same build is measured twice under two
+  labels to establish a floor; any delta that doesn't clear it is reported as
+  **"within noise — not claimed"** instead of as a multiplier.
+
+Measured on Arm Neoverse, around the metric agentic and RAG apps actually feel:
+**time-to-first-token on long contexts**.
+
+> **Numbers:** this README ships with **no headline figure**. The one-click
+> [`arm-bench`](.github/workflows/arm-bench.yml) job produces the real ladder, noise floor and
+> negative control on a free `ubuntu-24.04-arm` runner and renders the report into the run
+> summary. A synthetic sample report lives in [`bench/reports/`](bench/reports/) to show the
+> layout — its charts carry a **SYNTHETIC DEMO DATA** watermark burned into the pixels, because
+> a project that refuses unproven claims cannot lead with illustrative data.
 
 **What it is.** A small, rigorous, reproducible harness that measures where Arm CPU LLM
 inference actually hurts — **prefill / TTFT as context length grows** — and proves how much
 Arm-specific optimization recovers, in numbers a judge can re-run from CI.
+
+```mermaid
+flowchart LR
+    A["setup-engine\nprebuilt llama.cpp"] --> B["bench\nprefill/TTFT sweep"]
+    A --> C["ttft\nmeasured, prompt cache"]
+    A --> D["throughput\n1-8 parallel"]
+    subgraph CI["free Arm CI — ubuntu-24.04-arm (3 builds: generic / repack / KleidiAI)"]
+        B --> E["experiment\nladder + quality + ppl"]
+        E --> F["report\nHTML + MD, in run summary"]
+        C --> F
+        D --> F
+    end
+    G["profile\nArm Performix apx"] -.-> F
+```
 
 ## The optimization — baseline → changes → evidence
 
@@ -59,7 +103,7 @@ delta — closing that gap is the optimization story.
 
 | # | Change | Mechanism on Arm | Where in this repo |
 |---|---|---|---|
-| 1 | **KleidiAI microkernels** — rebuild llama.cpp with `-DGGML_CPU_KLEIDIAI=ON` | Arm's KleidiAI kernels repack **Q4_0/Q8_0** weights at load and route matmuls through **dotprod / i8mm / SME2** paths on Neoverse | built + compared automatically in [`arm-bench.yml`](.github/workflows/arm-bench.yml) (`kleidiai-before-after`), [`scripts/setup_arm_vm.sh`](scripts/setup_arm_vm.sh), [`docker/Dockerfile.arm64`](docker/Dockerfile.arm64) |
+| 1 | **KleidiAI microkernels** — rebuild llama.cpp with `-DGGML_CPU_KLEIDIAI=ON` | Arm's KleidiAI kernels repack **Q4_0/Q8_0** weights at load and route matmuls through **dotprod / i8mm / SVE2** paths on Neoverse (KleidiAI also ships SME2 kernels, but no shipping Neoverse server core implements SME as of 2026-08 — it's client silicon only) | built + compared automatically in [`arm-bench.yml`](.github/workflows/arm-bench.yml) (`kleidiai-before-after`), [`scripts/setup_arm_vm.sh`](scripts/setup_arm_vm.sh), [`docker/Dockerfile.arm64`](docker/Dockerfile.arm64) |
 | 2 | **Quantization scheme chosen for the silicon** — Q4_0 instead of Q4_K_M | KleidiAI accelerates **Q4_0, not k-quants** (verified in ggml's kleidiai source) — the "default" quant silently opts out of Arm acceleration | [`configs/experiments.yaml`](configs/experiments.yaml) `quant-sweep` + `kleidiai` |
 | 3 | **Thread count + CPU pinning** | `llama-bench -C/--cpu-mask + --cpu-strict` affinity on Neoverse cores | `thread-sweep` / `pinning` experiments |
 | 3b | **Quantized KV-cache** — q8_0 cache vs f16 (`-ctk/-ctv`, flash-attn pinned on) | halves KV-cache footprint and eases the memory-bandwidth pressure that dominates long-context prefill on Neoverse | `kv-cache` experiment |
@@ -77,16 +121,38 @@ delta — closing that gap is the optimization story.
 - **Quality guardrail per config** — an exact-match probe shows the speedup didn't buy speed
   with accuracy.
 - **$/M-token from real prices** (AWS pricing feed, dated in [`configs/instances.yaml`](configs/instances.yaml)).
-- **One click reproduces it**: the `kleidiai-before-after` CI job builds llama.cpp three ways,
-  runs the five headline experiments (KleidiAI before/after, build-flags, quant sweep, KV-cache,
-  micro-batch) plus the measured-TTFT and concurrency sweeps on a free Arm runner, and writes
-  the report into the run summary. (Thread/pinning/flash-attn sweeps run anywhere via
-  `firstflight experiment --name …`.)
+- **One click reproduces it**: the `kleidiai-before-after` CI job builds llama.cpp three ways
+  (generic armv8-a floor / native+repack default / KleidiAI), runs the attribution ladder in
+  **3 interleaved rounds** plus a **same-build noise-floor control**, the build-flags, quant,
+  KV-cache and micro-batch experiments, and the measured-TTFT and concurrency sweeps on a
+  free Arm runner — and writes the report into the run summary. (Thread/pinning/flash-attn
+  sweeps run anywhere via `firstflight experiment --name …`.)
+- **Attribution, not vibes**: a plain llama.cpp Release build already carries native targeting
+  **and** ggml's own aarch64 Q4_0 repack kernels (`GGML_NATIVE`/`GGML_CPU_REPACK` default ON —
+  verified in b9873's CMakeLists). So the ladder measures each mechanism on its own rung:
+  generic → repack → KleidiAI, with the same-build spread published next to it.
 
-**Reusable beyond this repo:** the pip-installable harness itself; the three-build
-(baseline / KleidiAI / -mcpu=native) before/after **CI recipe**; the **Performix `apx` wrapper** (the CLI flow is otherwise
-under-documented — sourced from Arm's MCP server); the **KleidiAI quant-support gotcha**
-(Q4_0-only) written down with sources; the measurement methodology; and the stage-by-stage
+## Why this exists — what the alternatives can't tell you
+
+| Where people look today | What it gives you | What it can't say |
+|---|---|---|
+| `llama-bench` | An honest tokens/sec number | *Which* mechanism produced it. Native targeting, ggml's repack and KleidiAI all land in one figure |
+| The [AWS Graviton llama.cpp guide](https://github.com/aws/aws-graviton-getting-started) | `-mcpu=native`, and it works | Never mentions KleidiAI at all, so the kernel question is never asked |
+| [Arm's own KleidiAI Learning Path](https://learn.arm.com/learning-paths/servers-and-cloud-computing/llama-cpu/) | A working chatbot on Graviton | Never passes the KleidiAI cmake flag, and never A/Bs against a build without it |
+| Vendor blog posts ("up to 4× on Graviton") | A headline multiplier | Build config usually undisclosed — silicon, flags, repack or kernels? Unknowable |
+| General LLM benchmark suites | Cross-engine comparisons | Backend-agnostic by design: no Arm build-variant axis, no proof a kernel engaged |
+
+This harness answers the question those leave open: **which mechanism, how much, and prove it.**
+Each rung of the ladder is a separate build, each speedup names its cause, activation is read
+from the load log rather than assumed, and a delta inside the measured noise floor is reported
+as *no win* rather than as a number.
+
+**Reusable beyond this repo:** the pip-installable harness itself (adoption recipes:
+[`docs/ADOPT.md`](docs/ADOPT.md)); a **drop-in Arm CI template**
+([`docs/arm-bench-template.yml`](docs/arm-bench-template.yml)) that runs the three-build ladder
+in any repo; the **Performix `apx` wrapper** (sourced from Arm's MCP server); the
+**KleidiAI quant-support constraint** (Q4_0/Q8_0 only) written down with sources; the
+measurement methodology; and the stage-by-stage
 [`versions/`](versions/) build for anyone learning to assemble a rig like this.
 
 **Why it should win.**
@@ -101,8 +167,8 @@ under-documented — sourced from Arm's MCP server); the **KleidiAI quant-suppor
 - **Potential Impact:** TTFT on long contexts is the cost/UX bottleneck for agentic & RAG
   workloads on cloud CPUs — exactly where Graviton/Ampere economics matter; every artifact
   above is reusable on any llama.cpp-on-Arm deployment.
-- **Developer Experience:** `pip install -e . && firstflight setup-engine && make smoke` on any
-  machine; `make bench && make report` for the full story; reproducible from CI with one click.
+- **Developer Experience:** `pip install -e . && firstflight setup-engine && firstflight smoke`
+  on any machine; `make bench && make report` for the full story; reproducible from CI.
 
 ## 2. Functionality / Output
 
@@ -118,6 +184,7 @@ under-documented — sourced from Arm's MCP server); the **KleidiAI quant-suppor
 | `firstflight throughput` | **Concurrency axis**: aggregate tok/s at 1/2/4/8 parallel requests via `llama-batched-bench` — the serving-throughput story behind the agentic/RAG pitch. |
 | `firstflight profile` | Runs Arm Performix (`apx` recipe `code_hotspots`) on a prefill run and surfaces the top hotspot functions into the report; no-ops cleanly off Arm. |
 | `firstflight experiment` | The **optimization axis**: benchmarks a set of configs from `configs/experiments.yaml` (quant scheme / threads / CPU pinning / KleidiAI build) **holding model + instance fixed**, runs a quality probe per config, **detects whether KleidiAI is actually active** (load-log proof), and renders the before/after report — proving the delta *and* that accuracy held. |
+| `firstflight perplexity` | Perplexity over a fixed corpus via `llama-perplexity` — the finer quality instrument (the 40-item probe can't resolve ~1% shifts). Also runs automatically per experiment config. |
 | `firstflight report` | Renders the before/after **markdown + standalone HTML** report (headline, charts, $/M-token, quality) from `bench/results/*.json` → `bench/reports/`. `--demo` previews the layout with synthetic data. |
 | `firstflight autotune --enable` | _(stretch, opt-in)_ Agent-in-the-loop optimizer: proposes a config → benchmarks → loops until no improvement. Default heuristic-grid proposer (no API key); `--llm` uses Claude (the `[agent]` extra). |
 
@@ -132,8 +199,9 @@ python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activ
 # or conda: conda create -n firstflight python=3.12 -y && conda activate firstflight
 pip install -e ".[report,dev]"
 firstflight setup-engine     # auto-downloads the prebuilt llama.cpp for THIS platform
-make smoke                   # real model download + real generation, on Win/Linux/mac, x64/arm64
+firstflight smoke            # real model download + real generation, Win/Linux/mac, x64/arm64
 ```
+(`make smoke` etc. work on Linux/macOS/Git Bash; plain `firstflight` commands work everywhere.)
 Without an engine (`setup-engine` not run, no `LLAMA_CPP_BIN`), everything still **skips
 cleanly with a clear message** — nothing crashes.
 
@@ -149,14 +217,20 @@ anyone — including judges — reproduce the numbers at zero cost:
 
 - **`smoke-arm`** (every push to `main` touching `src/`/`configs/`, and on every dispatch):
   real inference + baseline prefill sweep + report.
-- **`kleidiai-before-after`** (one click): builds llama.cpp **three ways** (baseline,
-  `-DGGML_CPU_KLEIDIAI=ON`, `-mcpu=native`) and runs the full evidence suite on the same
-  Q4_0 model: KleidiAI before/after with **active-detection** + quality guardrail, the
+- **`kleidiai-before-after`** (one dispatch): builds llama.cpp **three ways** — a **generic
+  armv8-a floor** (`GGML_NATIVE=OFF`, `GGML_CPU_REPACK=OFF`), the **native+repack default**,
+  and the **KleidiAI** build — and runs the full evidence suite on the same Q4_0 model: the
+  attribution ladder (3 interleaved rounds, up to 16k context) with **active-detection** +
+  quality guardrail + perplexity, the **same-build noise-floor control**, the
   Q8_0/Q4_K_M/Q4_0 quant sweep, the KV-cache and ubatch experiments, the build-flags
   comparison, the **measured-TTFT prompt-cache demo**, and the **concurrency sweep**.
 
 Both render the report **directly into the workflow run summary** (no artifact download needed
 to see the numbers) and upload the standalone HTML report + JSON results as an artifact.
+
+> **For judges / anyone without write access:** `Run workflow` needs write permission, so
+> fork the repo first, enable workflows on the fork when GitHub asks, then dispatch
+> **arm-bench** there — same free Arm runners, same report in the run summary.
 
 ### Path B — Remote Arm VM (for bigger models)
 On a fresh Ubuntu 24.04 **aarch64** instance — AWS Graviton `t4g`/`c7g`/`c8g` (primary;
@@ -186,7 +260,7 @@ src/firstflight/ cli · runner · engines/ · profile/ · bench/ · eval/ · cos
 bench/          results/ (JSON) · reports/ (generated)
 docker/         Dockerfile.arm64 (reproducible aarch64 env)
 scripts/        setup_arm_vm.sh · run_remote.sh
-docs/           EXPLAINER.md (concepts) · METHODOLOGY.md · RUNBOOK.md · DEMO_SCRIPT.md · DEVPOST.md (submission draft) · CONFIRM_ON_ARM.md
+docs/           EXPLAINER.md (concepts) · METHODOLOGY.md · RUNBOOK.md · ADOPT.md (+ CI template) · DEMO_SCRIPT.md · DEVPOST.md (submission draft) · CONFIRM_ON_ARM.md
 versions/       v1..v7 — the build sliced into cumulative, independently runnable stages
 .github/workflows/ ci.yml (lint+test) · arm-bench.yml (free Arm benchmarks)
 ```

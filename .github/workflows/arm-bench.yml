@@ -65,6 +65,16 @@ jobs:
       - name: Fetch prebuilt llama.cpp (our own bootstrap command)
         run: firstflight setup-engine --tag "$LLAMA_TAG"
 
+      # HF throttles repeat pulls from runner IPs (observed 2-8MB/s). Cache the GGUFs so a
+      # download only ever has to succeed once; save even when a later step fails.
+      - name: Restore model cache
+        uses: actions/cache/restore@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          restore-keys: |
+            models-${{ hashFiles('configs/models.yaml') }}-
+
       - name: Environment report
         run: firstflight info
 
@@ -94,6 +104,13 @@ jobs:
             echo "No report was generated (all measurement steps skipped?)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Save model cache (even on failure — a good download must only happen once)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+
       - name: Upload results + report
         if: always()
         uses: actions/upload-artifact@v4
@@ -122,14 +139,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake git time libcurl4-openssl-dev
 
-      - name: Cache llama.cpp builds (keyed on tag — skips the triple rebuild on re-dispatch)
-        uses: actions/cache@v4
+      # Bin dirs only (the workflow and find_binary only need build/bin), and an explicit
+      # save with if:always() — run #6 built all three variants successfully, then failed on
+      # a benchmark step, and the default cache post-step skipped the save. Never again:
+      # a completed build gets banked no matter what happens later in the job.
+      - name: Restore llama.cpp builds
+        uses: actions/cache/restore@v4
         with:
           path: |
-            llama-generic
-            llama-baseline
-            llama-kleidiai
-          key: llama-builds-${{ env.LLAMA_TAG }}-v3
+            llama-generic/build/bin
+            llama-baseline/build/bin
+            llama-kleidiai/build/bin
+          key: llama-builds-${{ env.LLAMA_TAG }}-v4-${{ github.run_id }}
+          restore-keys: |
+            llama-builds-${{ env.LLAMA_TAG }}-v4-
+
+      - name: Restore model cache
+        uses: actions/cache/restore@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          restore-keys: |
+            models-${{ hashFiles('configs/models.yaml') }}-
 
       # ttft/throughput need llama-server + llama-batched-bench from the kleidiai build.
       # Keep them in the target list or those steps silently skip.
@@ -263,6 +294,23 @@ jobs:
         run: |
           firstflight profile --no-download || \
             echo "_Performix step did not produce hotspots (apx unavailable on this runner) — see docs/RUNBOOK.md section D for the VM path._" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save llama.cpp builds (even on failure)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            llama-generic/build/bin
+            llama-baseline/build/bin
+            llama-kleidiai/build/bin
+          key: llama-builds-${{ env.LLAMA_TAG }}-v4-${{ github.run_id }}
+
+      - name: Save model cache (even on failure)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
 
       - name: Render the combined report (priced at this runner's $0/hr)
         run: firstflight report --instance github-arm-runner

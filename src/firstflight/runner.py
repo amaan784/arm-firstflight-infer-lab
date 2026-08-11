@@ -1,9 +1,8 @@
 """Top-level orchestration.
 
-`smoke()` is the end-to-end sanity check that proves the pipeline on any machine.
-`bench()` runs the prefill/TTFT sweep via `firstflight.bench.prefill`, writes a
-structured JSON result, and prints a summary. Both degrade gracefully (clean skip) when no
-llama.cpp binary is present.
+`smoke()` is the end-to-end sanity check; it runs on any machine. `bench()` runs the
+prefill/TTFT sweep via `firstflight.bench.prefill`, writes a JSON result, prints a
+summary. Both skip cleanly when no llama.cpp binary is present.
 """
 
 from __future__ import annotations
@@ -26,11 +25,12 @@ def _skip(message: str) -> int:
     return 0
 
 
-def smoke(download: bool = True, n_predict: int = 24) -> int:
+def smoke(download: bool = True, n_predict: int = 24, timeout: float = 90.0) -> int:
     """Download the tiny smoke model and run llama.cpp once.
 
-    Returns a process exit code: 0 on success OR on a clean skip (no binary), 1 on a real
-    failure (binary present but the run errored / produced no output).
+    Exit code: 0 on success or on a clean skip (no binary), 1 on a real failure (binary
+    present, run errored or produced no output). 90s default: 24 tokens on a 0.5B model
+    takes seconds; five silent minutes on the first documented command is a bounce.
     """
     console.rule("[bold]firstflight smoke[/]")
 
@@ -53,12 +53,17 @@ def smoke(download: bool = True, n_predict: int = 24) -> int:
         return 1
 
     console.print("Running one generation...")
-    result = llama_cpp.run_once(cli, model_path, n_predict=n_predict)
+    result = llama_cpp.run_once(cli, model_path, n_predict=n_predict, timeout=timeout)
 
     if not result.ok:
         console.print(f"[red]llama.cpp exited {result.returncode}[/]")
         if result.stderr.strip():
             console.print(f"[dim]{safe(result.stderr.strip()[-800:])}[/]")
+        if "timed out" in result.stderr:
+            console.print(
+                "[dim]Slow machine? Re-run with --timeout 300. If it still hangs, check "
+                "that the binary runs by hand with stdin redirected from null.[/]"
+            )
         return 1
 
     completion = result.stdout.strip()
@@ -73,7 +78,7 @@ def smoke(download: bool = True, n_predict: int = 24) -> int:
 
 
 def _resolve_model(models, model_id: str | None, variant: str | None):
-    """Resolve (ModelSpec, variant_name) from optional overrides, defaulting to the smoke model."""
+    """(ModelSpec, variant_name) from optional overrides. Defaults to the smoke model."""
     if model_id is None:
         spec, mv = models.smoke()
         return spec, (variant or mv.name)
@@ -127,7 +132,7 @@ def bench(
     download: bool = True,
     dry_run: bool = False,
 ) -> int:
-    """Run the prefill/TTFT sweep and write a JSON result. Returns a process exit code."""
+    """Run the prefill/TTFT sweep, write a JSON result. Returns a process exit code."""
     console.rule(f"[bold]firstflight bench[/] [{label}]")
 
     models = load_models()
@@ -149,7 +154,16 @@ def bench(
     if dry_run:
         shown = bench_bin or "llama-bench"
         cmd = prefill.build_llama_bench_command(
-            shown, model_dir() / mv.file, lengths, [gen], threads, reps, "json"
+            shown,
+            model_dir() / mv.file,
+            lengths,
+            [gen],
+            threads,
+            reps,
+            "json",
+            prio=2,
+            mmap=False,
+            delay=2,  # mirror run_sweep's steadiness flags so dry-run shows the real command
         )
         console.print("\n[dim]dry-run command:[/]")
         console.print("  " + " ".join(f'"{c}"' if " " in str(c) else str(c) for c in cmd))
@@ -210,9 +224,8 @@ def ttft(
 ) -> int:
     """MEASURED TTFT + prompt-cache demo via llama-server (see bench/ttft.py).
 
-    Starts llama-server, sends the same long prefix with two different questions, and reports
-    the server's own measured prompt-processing time cold vs warm. Clean skip without a
-    llama-server binary.
+    Sends the same long prefix with two different questions and reports the server's own
+    prompt-processing time, cold vs warm. Clean skip without a llama-server binary.
     """
     import subprocess
     from datetime import UTC, datetime
@@ -240,13 +253,13 @@ def ttft(
         if not model_path.exists():
             return _skip(f"model not present ({model_path.name}) and --no-download set.")
 
-    # Ephemeral port by default: a fixed port could race a stale/foreign server and measure
-    # the wrong model. --port still allows an explicit choice.
+    # Ephemeral port by default: a fixed port can race a stale/foreign server and measure
+    # the wrong model. --port overrides.
     if port is None:
         port = tmod.free_port()
     base = f"http://127.0.0.1:{port}"
-    # Context must hold the whole prefix + question + generation; the 4-chars/token sizing
-    # heuristic can undershoot tokens, so pad generously (server default 4096 would truncate).
+    # Context has to hold prefix + question + generation. The 4-chars/token sizing heuristic
+    # undershoots, so pad; the server default of 4096 would truncate.
     ctx = int(prefix_tokens * 1.6) + n_predict + 256
     cmd = tmod.build_server_cmd(
         server_bin,
@@ -260,8 +273,8 @@ def ttft(
     console.print(f"Server: [green]{server_bin}[/]  (--cache-reuse {cache_reuse}, port {port})")
     console.print(f"Prefix target: ~{prefix_tokens} tokens; measuring cold vs warm turn...")
 
-    # stdout/stderr -> DEVNULL: an undrained PIPE fills the OS buffer and BLOCKS the server
-    # mid-request (observed class of bug); we only need the HTTP responses.
+    # stdout/stderr -> DEVNULL: an undrained PIPE fills the OS buffer and blocks the server
+    # mid-request (observed). We only need the HTTP responses.
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,
@@ -442,7 +455,7 @@ def profile(
     threads: int | None = None,
     download: bool = True,
 ) -> int:
-    """Profile a representative prefill run with Arm Performix (apx). No-op off Arm."""
+    """Profile one prefill run with Arm Performix (apx). No-op off Arm."""
     from .profile.performix import PerformixProfiler, profile_filename
 
     console.rule("[bold]firstflight profile[/]")
@@ -504,12 +517,18 @@ def experiment(
     download: bool = True,
     render: bool = True,
     instance_name: str | None = None,
+    rounds: int = 1,
 ) -> int:
-    """Run a before/after experiment: bench + quality-eval each config, holding model fixed.
+    """Before/after experiment: bench + quality-eval each config, model held fixed.
 
-    Each config becomes a labelled SweepResult in bench/results/*.json; the report then shows
-    the speed delta AND the quality delta. Configs whose binary/model are missing are skipped
-    with a message (so it degrades gracefully off the bench box).
+    Each config becomes a labelled SweepResult in bench/results/*.json; the report shows the
+    speed delta AND the quality delta. Configs whose binary/model are missing are skipped
+    with a message, so this still runs off the bench box.
+
+    rounds > 1 interleaves the configs round-robin (A,B,A,B,...) and writes one result per
+    round; the report collapses same-label rounds to the median with the between-round
+    spread. Strictly-blocked runs would confound slow drift (co-tenants, thermals) with the
+    treatment. Quality runs once per config (round 0): greedy decoding doesn't drift.
     """
     from .config import load_experiments
     from .eval import quality as qmod
@@ -519,8 +538,33 @@ def experiment(
     models = load_models()
     wl = load_workloads().get(spec.workload)
     console.print(f"Experiment: [bold]{spec.name}[/] - {spec.description}")
-    console.print(f"Workload: {wl.name}   configs: {len(spec.configs)}   quality: {quality}")
+    console.print(
+        f"Workload: {wl.name}   configs: {len(spec.configs)}   quality: {quality}"
+        + (f"   rounds: {rounds}" if rounds > 1 else "")
+    )
 
+    written: list = []
+    for rnd in range(max(1, rounds)):
+        if rounds > 1:
+            console.print(f"\n[bold cyan]-- round {rnd + 1}/{rounds} --[/]")
+        written += _experiment_round(
+            spec, models, wl, quality=quality and rnd == 0, download=download, qmod=qmod
+        )
+
+    if not written:
+        # Exit red: a green run with zero measurements would hide an env/plumbing mistake.
+        console.print("\n[red]No configs ran[/] (binaries/models missing) - see messages above.")
+        return 1
+
+    console.print(f"\n[green]OK[/] {len(written)} result(s) in bench/results/")
+    if render:
+        console.print("Rendering report...")
+        return report(instance_name=instance_name)
+    return 0
+
+
+def _experiment_round(spec, models, wl, *, quality: bool, download: bool, qmod) -> list:
+    """One pass over the experiment's configs. Returns the result paths written."""
     written: list = []
     for cfg in spec.configs:
         model_id = cfg.model_id or spec.model
@@ -593,16 +637,25 @@ def experiment(
             console.print(f"[red]{cfg.label} bench failed:[/] {safe(str(exc))}")
             continue
 
-        sweep.experiment = spec.name  # tag so combined reports can group by experiment
+        sweep.experiment = spec.name  # so combined reports can group by experiment
 
         cli_bin = llama_cpp.find_binary("cli", env_value=cfg.bin or None)
 
-        # Prove (don't assume) whether KleidiAI kernels are active for this binary+model.
+        # Prove, don't assume, which kernel path is active for this binary+model.
         if cli_bin is not None:
-            active = llama_cpp.detect_kleidiai(cli_bin, model_path, threads=cfg.threads)
-            sweep.host.kleidiai = active
-            if active is not None:
-                console.print(f"  kleidiai active: {'yes' if active else 'no'}")
+            probe = llama_cpp.probe_backend(cli_bin, model_path, threads=cfg.threads)
+            sweep.host.kleidiai = probe.kleidiai
+            sweep.host.system_info = probe.system_info
+            sweep.host.kernel_buffer = probe.kernel_buffer
+            sweep.host.cpu_features = probe.cpu_features
+            sweep.host.kernel_tier = probe.kernel_tier
+            sweep.host.repack = probe.repack
+            if probe.kleidiai is not None:
+                console.print(f"  kleidiai active: {'yes' if probe.kleidiai else 'no'}")
+            if probe.kernel_buffer:
+                console.print(f"  weight buffer: {safe(probe.kernel_buffer)}")
+            if probe.kernel_tier:
+                console.print(f"  kernel tier:   {safe(probe.kernel_tier)}")
 
         if quality:
             if cli_bin is not None:
@@ -617,19 +670,74 @@ def experiment(
             else:
                 console.print("  [dim]quality skipped: no llama-cli binary[/]")
 
+            # Perplexity: the finer instrument (the probe can't resolve ~1% shifts).
+            # Best-effort: a missing binary or parse failure never sinks the experiment.
+            from .eval import perplexity as pmod
+
+            ppl_bin = llama_cpp.find_binary("perplexity", env_value=cfg.bin or None)
+            if ppl_bin is not None:
+                try:
+                    corpus = pmod.ensure_default_corpus(model_dir())
+                    if corpus is not None:
+                        pr = pmod.run_perplexity(ppl_bin, model_path, corpus, threads=cfg.threads)
+                        sweep.quality = {**(sweep.quality or {}), "ppl": pr.ppl}
+                        console.print(f"  perplexity: {pr.ppl:.2f} ({pr.corpus})")
+                except pmod.PerplexityError as exc:
+                    console.print(f"  [dim]perplexity skipped: {safe(str(exc)[:160])}[/]")
+
         out = results_dir() / result_filename(model_id, cfg.variant, cfg.label, sweep.timestamp)
         sweep.save_json(out)
         written.append(out)
         console.print(f"  [green]OK[/] wrote {out.name}")
 
-    if not written:
-        console.print("\n[yellow]No configs ran[/] (binaries/models missing) - see messages above.")
-        return 0
+    return written
 
-    console.print(f"\n[green]OK[/] {len(written)} result(s) in bench/results/")
-    if render:
-        console.print("Rendering report...")
-        return report(instance_name=instance_name)
+
+def perplexity(
+    *,
+    model_id: str | None = None,
+    variant: str | None = None,
+    corpus_file=None,
+    chunks: int = 8,
+    threads: int | None = None,
+    download: bool = True,
+) -> int:
+    """Perplexity over a fixed corpus via llama-perplexity. Skips cleanly without the binary."""
+    from pathlib import Path
+
+    from .eval import perplexity as pmod
+
+    console.rule("[bold]firstflight perplexity[/]")
+    ppl_bin = llama_cpp.find_binary("perplexity")
+    if ppl_bin is None:
+        return _skip("no llama.cpp `llama-perplexity` binary found.")
+
+    models = load_models()
+    spec, var_name = _resolve_model(models, model_id, variant)
+    mv = spec.variant(var_name)
+    if download:
+        try:
+            model_path = ensure_model(spec, mv)
+        except Exception as exc:
+            console.print(f"[red]Download failed:[/] {safe(str(exc))}")
+            return 1
+    else:
+        model_path = model_dir() / mv.file
+        if not model_path.exists():
+            return _skip(f"model not present ({model_path.name}) and --no-download set.")
+
+    corpus = Path(corpus_file) if corpus_file else pmod.ensure_default_corpus(model_dir())
+    if corpus is None:
+        console.print("[red]No corpus:[/] pass --file (the default docs corpus needs a checkout).")
+        return 1
+
+    console.print(f"Engine: [green]{ppl_bin}[/]   corpus: {corpus.name}   chunks: {chunks}")
+    try:
+        pr = pmod.run_perplexity(ppl_bin, model_path, corpus, chunks=chunks, threads=threads)
+    except pmod.PerplexityError as exc:
+        console.print(f"[red]perplexity failed:[/] {safe(str(exc))}")
+        return 1
+    console.print(f"\n[green]OK[/] PPL = [bold]{pr.ppl:.4f}[/] (lower is better)")
     return 0
 
 
@@ -645,7 +753,7 @@ def autotune(
 ) -> int:
     """Agent-in-the-loop optimizer: propose -> benchmark -> loop until no improvement.
 
-    Strictly opt-in (the CLI gates this behind --enable). Degrades gracefully: no binary -> skip.
+    Opt-in only; the CLI gates it behind --enable. No binary -> skip.
     """
     import json
     import os

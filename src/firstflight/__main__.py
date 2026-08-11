@@ -1,4 +1,4 @@
-"""Enable `python -m firstflight ...` as an alias for the `firstflight` console script."""
+"""`python -m firstflight ...` as an alias for the `firstflight` console script."""
 
 from firstflight.cli import main
 

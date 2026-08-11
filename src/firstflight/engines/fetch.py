@@ -2,12 +2,12 @@
 
 `firstflight setup-engine` downloads the official release asset for this OS/arch from
 github.com/ggml-org/llama.cpp, extracts it into `./engine` (gitignored), and `find_binary`
-picks it up automatically — so `firstflight smoke` runs REAL inference on any machine
-(Windows/Linux/macOS, x64/arm64) without a compiler.
+picks it up. So `firstflight smoke` runs real inference on any machine (Windows/Linux/macOS,
+x64/arm64) without a compiler.
 
 Asset filename patterns follow the release naming convention (pattern verified 2026-06-26 for
-ubuntu-arm64; the exact per-platform names are re-verified against the live Releases page).
-Note: prebuilt assets are plain CPU builds — the KleidiAI comparison still uses the
+ubuntu-arm64; per-platform names are re-verified against the live Releases page).
+Prebuilt assets are plain CPU builds, so the KleidiAI comparison still needs the
 `-DGGML_CPU_KLEIDIAI=ON` source build (see arm-bench.yml / scripts/setup_arm_vm.sh).
 """
 
@@ -22,9 +22,9 @@ from tqdm import tqdm
 
 from ..util import bytes_human, console, engine_dir, machine, platform_system
 
-# Pinned release tag (floats; bump deliberately). Keep in sync with arm-bench.yml/Dockerfile.
-# b9873 (2026-07-04) verified live 2026-07-05: all ASSET_PATTERNS below exist on this release,
-# and the win-cpu-x64 zip ships llama-cli.exe / llama-bench.exe at the archive root.
+# Pinned tag. Tags float, so bump this on purpose. Keep in sync with arm-bench.yml/Dockerfile.
+# b9873 (2026-07-04) verified live 2026-07-05: every ASSET_PATTERNS entry below exists on this
+# release, and the win-cpu-x64 zip ships llama-cli.exe / llama-bench.exe at the archive root.
 DEFAULT_TAG = "b9873"
 
 # (system, arch) -> asset filename pattern. {tag} is substituted.
@@ -88,8 +88,8 @@ def setup_engine(
 ) -> Path:
     """Download + extract the prebuilt llama.cpp for this platform. Returns the engine dir.
 
-    Idempotent: if the dest already contains a llama-cli/llama-bench, it is reused unless
-    `force`. Raises EngineFetchError on unsupported platforms or download failures.
+    Idempotent: an existing llama-cli/llama-bench under dest is reused unless `force`.
+    Raises EngineFetchError on unsupported platforms or download failures.
     """
     from . import llama_cpp  # local import to avoid a cycle at module load
 

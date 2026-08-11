@@ -1,7 +1,6 @@
 """Typed loaders for configs/models.yaml, instances.yaml, workloads.yaml.
 
-Light dataclasses over plain dicts — enough structure to catch typos without a heavy
-schema dependency.
+Light dataclasses over plain dicts: enough structure to catch typos, no schema dependency.
 """
 
 from __future__ import annotations
@@ -198,7 +197,7 @@ def load_workloads(path: Path | None = None) -> WorkloadsConfig:
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    """One point on the before/after axis (a labelled config to benchmark)."""
+    """One labelled config to benchmark (a point on the before/after axis)."""
 
     label: str
     variant: str
@@ -206,7 +205,7 @@ class ExperimentConfig:
     threads: int | None = None
     cpu_mask: str = ""  # hex CPU mask for llama-bench -C (pinning); "" = none
     cpu_strict: bool = False
-    bin: str = ""  # optional llama.cpp binary/dir override (e.g. a KleidiAI build); env-expanded
+    bin: str = ""  # llama.cpp binary/dir override (e.g. a KleidiAI build); env-expanded
     gen: int | None = None
     cache_type_k: str = ""  # KV-cache K type for llama-bench -ctk (e.g. "q8_0"); "" = default f16
     cache_type_v: str = ""  # KV-cache V type for llama-bench -ctv

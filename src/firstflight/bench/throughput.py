@@ -1,15 +1,15 @@
 """Concurrency / server-throughput axis via `llama-batched-bench`.
 
-Everything else in the harness is single-stream, but the pitch targets agentic/RAG serving —
-a CONCURRENT workload. `llama-batched-bench` (shipped in every llama.cpp build, incl. the
-prebuilt archives `setup-engine` fetches) measures throughput at parallel levels: it prefills
-`-npp` prompt tokens and generates `-ntg` tokens for `-npl` parallel sequences.
+The rest of the harness is single-stream, but agentic/RAG serving is a concurrent workload.
+llama-batched-bench ships in every llama.cpp build, including the prebuilt archives
+setup-engine fetches. It prefills -npp prompt tokens and generates -ntg tokens for -npl
+parallel sequences.
 
-Flags verified against the real b9873 binary (2026-07-30): `-npp n0,n1,...`, `-ntg`, `-npl`,
-and `--output-format {md,jsonl}` — we use **jsonl** (one JSON object per completed run).
-JSONL field names VERIFIED against llama.cpp master source (tools/batched-bench, 2026-07-31):
-pp, tg, pl, n_kv, t_pp, speed_pp, t_tg, speed_tg, t, speed — exactly the primary keys the
-parser below reads (aliases retained as belt-and-braces; raw rows always preserved).
+Flags confirmed against the real b9873 binary (2026-07-30): `-npp n0,n1,...`, `-ntg`, `-npl`,
+`--output-format {md,jsonl}`. We use jsonl, one JSON object per completed run.
+JSONL field names verified against llama.cpp master source (tools/batched-bench, 2026-07-31):
+pp, tg, pl, n_kv, t_pp, speed_pp, t_tg, speed_tg, t, speed. Those are the primary keys the
+parser reads; the aliases are belt-and-braces and raw rows are always kept.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 
 
 class ThroughputError(RuntimeError):
-    """llama-batched-bench failed (non-zero exit / unparseable output)."""
+    """llama-batched-bench failed: non-zero exit or unparseable output."""
 
 
 def build_batched_bench_command(
@@ -33,9 +33,9 @@ def build_batched_bench_command(
     levels: list[int] | None = None,
     threads: int | None = None,
 ) -> list[str]:
-    """Construct a `llama-batched-bench` invocation for a parallel-level sweep.
+    """Build a `llama-batched-bench` invocation for a parallel-level sweep.
 
-    `-c` (context) must hold every parallel sequence: max(level) * (npp + ntg), with margin.
+    -c has to hold every parallel sequence: max(level) * (npp + ntg), plus margin.
     """
     levels = levels or [1, 2, 4, 8]
     ctx = max(levels) * (npp + ntg) + 256
@@ -61,14 +61,14 @@ def build_batched_bench_command(
 
 @dataclass
 class ThroughputPoint:
-    """One parallel level's result. speed = total tokens/sec across all sequences."""
+    """One parallel level. Speeds are aggregate across all sequences."""
 
     parallel: int
     pp: int
     tg: int
-    speed_pp: float  # prompt-processing tokens/sec (aggregate)
-    speed_tg: float  # generation tokens/sec (aggregate)
-    speed: float  # overall tokens/sec (aggregate)
+    speed_pp: float  # prompt-processing tok/s
+    speed_tg: float  # generation tok/s
+    speed: float  # overall tok/s
     raw: dict = field(default_factory=dict)
 
 
@@ -83,7 +83,7 @@ def _num(row: dict, *keys, default=0.0) -> float:
 
 
 def parse_jsonl(text: str) -> list[ThroughputPoint]:
-    """Parse `--output-format jsonl` lines into points (tolerant key mapping, raw preserved)."""
+    """`--output-format jsonl` lines as points. Tolerant key mapping, raw row kept."""
     points: list[ThroughputPoint] = []
     for line in (text or "").splitlines():
         line = line.strip()
@@ -111,7 +111,7 @@ def parse_jsonl(text: str) -> list[ThroughputPoint]:
 
 @dataclass
 class ThroughputResult:
-    """A parallel-level sweep. Saved to bench/results/throughput_*.json."""
+    """One parallel-level sweep. Saved to bench/results/throughput_*.json."""
 
     timestamp: str
     model: str
@@ -159,7 +159,7 @@ def run_sweep(
     threads: int | None,
     timeout: float = 3600.0,
 ) -> list[ThroughputPoint]:
-    """Execute the parallel-level sweep. Raises ThroughputError on failure (incl. timeout)."""
+    """Run the parallel-level sweep. Raises ThroughputError on failure, timeout included."""
     cmd = build_batched_bench_command(
         bench_bin, model_path, npp=npp, ntg=ntg, levels=levels, threads=threads
     )

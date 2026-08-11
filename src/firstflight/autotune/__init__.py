@@ -1,4 +1,4 @@
-"""Agentic autotuner (stretch goal). Strictly optional; core ships without it."""
+"""Agentic autotuner (stretch goal). Optional; the core ships without it."""
 
 from __future__ import annotations
 

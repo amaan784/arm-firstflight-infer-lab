@@ -1,6 +1,6 @@
-"""Small shared helpers: paths, platform detection, console output.
+"""Shared helpers: paths, platform detection, console output.
 
-Kept dependency-light (only `rich`, a core dep) so the smoke path stays portable.
+Only depends on `rich` (a core dep) so the smoke path stays portable.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from rich.markup import escape as _markup_escape
 
 
 def _init_console() -> Console:
-    # Prefer UTF-8 where the stream allows it; on legacy Windows code pages we additionally
-    # keep console output ASCII-safe (see `ascii_safe`) so nothing ever crashes on encode.
+    # UTF-8 where the stream allows it. Legacy Windows code pages also go through `ascii_safe`,
+    # so an encode error can't crash us.
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
@@ -29,14 +29,13 @@ console = _init_console()
 
 
 def ascii_safe(text: str) -> str:
-    """Replace characters the local console can't encode — portable status output."""
+    """Replace characters the local console can't encode."""
     return text.encode("ascii", "replace").decode("ascii")
 
 
 def safe(text: str) -> str:
-    """ASCII-safe AND rich-markup-escaped — use for any DYNAMIC text (exceptions, model
-    output, filenames) interpolated into `console.print`, so `[...]` in the text isn't eaten
-    as a markup tag.
+    """ASCII-safe and rich-markup-escaped. For any dynamic text (exceptions, model output,
+    filenames) going into `console.print`, so `[...]` isn't eaten as a markup tag.
     """
     return _markup_escape(ascii_safe(text))
 
@@ -47,17 +46,17 @@ _ARM_MACHINES = {"aarch64", "arm64"}
 
 
 def machine() -> str:
-    """Normalized CPU architecture string, e.g. 'aarch64', 'x86_64'."""
+    """CPU architecture, lowercased: 'aarch64', 'x86_64'."""
     return platform.machine().lower()
 
 
 def platform_system() -> str:
-    """Normalized OS name: 'windows', 'linux', or 'darwin'."""
+    """OS name, lowercased: 'windows', 'linux', 'darwin'."""
     return platform.system().lower()
 
 
 def is_arm64() -> bool:
-    """True on Arm (aarch64/arm64) hosts."""
+    """True on aarch64/arm64 hosts."""
     return machine() in _ARM_MACHINES
 
 
@@ -66,7 +65,7 @@ def is_linux() -> bool:
 
 
 def is_arm_linux() -> bool:
-    """The environment where Arm-only tooling (Performix, KleidiAI) is expected."""
+    """Where the Arm-only tooling (Performix, KleidiAI) is expected to work."""
     return is_arm64() and is_linux()
 
 
@@ -78,24 +77,28 @@ def platform_tag() -> str:
 
 
 def repo_root() -> Path:
-    """Best-effort repository root (the dir containing `configs/` and `pyproject.toml`).
+    """Working root: the checkout when there is one, else cwd.
 
-    Works for an editable install (src/firstflight/util.py -> repo root) and falls back
-    to the current working directory otherwise.
+    Order: $FIRSTFLIGHT_WORK_DIR -> the dir holding configs/ + pyproject.toml (editable
+    install) -> cwd. The old fallback resolved INSIDE site-packages on a non-editable
+    install, so models/reports landed invisibly inside the venv and died with it.
     """
+    env = os.environ.get("FIRSTFLIGHT_WORK_DIR")
+    if env:
+        return Path(env)
     here = Path(__file__).resolve()
     for parent in [here, *here.parents]:
         if (parent / "configs").is_dir() and (parent / "pyproject.toml").exists():
             return parent
-    return here.parents[2] if len(here.parents) >= 3 else Path.cwd()
+    return Path.cwd()
 
 
 def config_dir() -> Path:
     """Directory holding models.yaml / instances.yaml / workloads.yaml.
 
-    Resolution order: $FIRSTFLIGHT_CONFIG_DIR -> the repo checkout's configs/ -> the copies
-    packaged inside the wheel (firstflight/configs, shipped via force-include) so a plain
-    non-editable `pip install` works outside a checkout.
+    Order: $FIRSTFLIGHT_CONFIG_DIR -> the checkout's configs/ -> the copies inside the wheel
+    (firstflight/configs, shipped via force-include), so a non-editable `pip install` works
+    outside a checkout.
     """
     env = os.environ.get("FIRSTFLIGHT_CONFIG_DIR")
     if env:
@@ -109,7 +112,7 @@ def config_dir() -> Path:
         packaged = Path(str(files("firstflight") / "configs"))
         if packaged.is_dir():
             return packaged
-    except Exception:  # noqa: BLE001 - fall through to the repo path (clear error downstream)
+    except Exception:  # noqa: BLE001 - fall back to the repo path; error surfaces downstream
         pass
     return repo
 
@@ -123,10 +126,10 @@ def model_dir() -> Path:
 
 
 def engine_dir() -> Path:
-    """Where `firstflight setup-engine` places prebuilt llama.cpp binaries (gitignored).
+    """Where `firstflight setup-engine` puts prebuilt llama.cpp binaries (gitignored).
 
-    `find_binary` searches here automatically, after $LLAMA_CPP_BIN and before PATH.
-    Override with FIRSTFLIGHT_ENGINE_DIR.
+    `find_binary` searches here after $LLAMA_CPP_BIN and before PATH. Override with
+    FIRSTFLIGHT_ENGINE_DIR.
     """
     env = os.environ.get("FIRSTFLIGHT_ENGINE_DIR")
     return Path(env) if env else repo_root() / "engine"

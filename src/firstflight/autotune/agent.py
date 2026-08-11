@@ -1,17 +1,17 @@
-"""Agent-in-the-loop autotuner (stretch goal — strictly opt-in via `--enable`).
+"""Agent-in-the-loop autotuner (stretch goal, opt-in via `--enable`).
 
-The loop: propose a config -> benchmark it -> score it -> repeat until no improvement (or the
-search space is exhausted). Two proposers:
+The loop: propose a config -> benchmark it -> score it -> repeat until no improvement or the
+search space is exhausted. Two proposers:
 
-  - **HeuristicProposer (default):** deterministic grid over quant variant x thread count. No
-    API key, no network — the autotuner works out of the box.
-  - **LLMProposer (optional):** an LLM (Claude) reads the Performix hotspots + the trajectory so
-    far and proposes the next config as JSON. Lazy-imports `anthropic` (the `[agent]` extra) and
-    falls back to the heuristic grid if the model repeats or returns something invalid. The Arm
-    MCP server (github.com/arm/mcp) is the intended hook for richer Performix-driven proposals.
+  - **HeuristicProposer (default):** deterministic grid over quant variant x thread count.
+    No API key, no network, so the autotuner works out of the box.
+  - **LLMProposer (optional):** Claude reads the Performix hotspots plus the trajectory so far
+    and proposes the next config as JSON. Lazy-imports `anthropic` (the `[agent]` extra) and
+    falls back to the heuristic grid if the model repeats itself or returns junk. The Arm MCP
+    server (github.com/arm/mcp) is the intended hook for richer Performix-driven proposals.
 
-The core `optimize()` loop is pure and testable (inject any `benchmark_fn`); the real wiring
-(download model variants, run `llama-bench`, save results) lives in `runner.autotune`.
+`optimize()` is pure and testable (inject any `benchmark_fn`); the real wiring (download model
+variants, run `llama-bench`, save results) lives in `runner.autotune`.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-DEFAULT_LLM_MODEL = "claude-sonnet-5"  # current Sonnet; capable + economical for config proposals
+DEFAULT_LLM_MODEL = "claude-sonnet-5"  # current Sonnet; cheap enough for one-shot proposals
 
 
 @dataclass(frozen=True)
@@ -68,13 +68,13 @@ class Proposer(Protocol):
 
 
 def _ordered_grid(variants: list[str], thread_options: list[int]) -> list[TuneConfig]:
-    # Try the KleidiAI-accelerated q4_0 first, then other quants; vary threads within each.
+    # q4_0 first (KleidiAI-accelerated), then the rest; threads vary within each variant.
     vorder = sorted(variants, key=lambda v: (v != "q4_0", v))
     return [TuneConfig(v, t) for v in vorder for t in thread_options]
 
 
 class HeuristicProposer:
-    """Deterministic grid search over (variant, threads)."""
+    """Deterministic grid over (variant, threads)."""
 
     def __init__(self, variants: list[str], thread_options: list[int]) -> None:
         self.grid = _ordered_grid(variants, thread_options)
@@ -112,7 +112,7 @@ def build_llm_prompt(state: AutotuneState, variants: list[str], thread_options: 
 
 
 def parse_config(text: str, variants: list[str], thread_options: list[int]) -> TuneConfig | None:
-    """Parse an LLM reply into a valid TuneConfig (None if invalid)."""
+    """LLM reply -> TuneConfig. None if it isn't parseable or names an unknown variant."""
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:
         return None
@@ -126,13 +126,13 @@ def parse_config(text: str, variants: list[str], thread_options: list[int]) -> T
     threads = obj.get("threads")
     threads = int(threads) if threads is not None else None
     if threads is not None and threads not in thread_options:
-        # snap to the nearest allowed thread count
+        # snap to the nearest allowed count
         threads = min(thread_options, key=lambda x: abs(x - threads)) if thread_options else None
     return TuneConfig(variant=variant, threads=threads)
 
 
 class LLMProposer:
-    """Claude-backed proposer; falls back to the heuristic grid on any failure/repeat."""
+    """Claude-backed proposer. Falls back to the heuristic grid on any failure or repeat."""
 
     def __init__(
         self,
@@ -167,7 +167,7 @@ class LLMProposer:
             )
             text = "".join(getattr(b, "text", "") for b in resp.content)
             return parse_config(text, self.variants, self.thread_options)
-        except Exception:  # noqa: BLE001 - network/auth/parse issues -> fall back to grid
+        except Exception:  # noqa: BLE001 - network/auth/parse issues -> grid
             return None
 
 
@@ -179,7 +179,7 @@ def optimize(
     max_iters: int = 12,
     patience: int = 3,
 ) -> AutotuneState:
-    """Drive the propose -> benchmark -> score loop until no improvement / exhaustion.
+    """Drive the propose -> benchmark -> score loop.
 
     `benchmark_fn(config)` runs the config and returns a TuneTrial (higher score is better).
     Stops after `patience` consecutive non-improving trials, when the proposer is exhausted

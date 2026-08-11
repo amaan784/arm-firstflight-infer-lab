@@ -1,4 +1,4 @@
-"""Profiling adapters. `performix` wraps Arm Performix; it no-ops cleanly off Arm."""
+"""Profiling adapters. `performix` wraps Arm Performix; it no-ops off Arm."""
 
 from __future__ import annotations
 

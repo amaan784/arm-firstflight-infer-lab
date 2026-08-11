@@ -1,8 +1,8 @@
 """`firstflight` command-line entrypoint.
 
-Subcommands: setup-engine · info · smoke · download · run · bench · ttft · throughput ·
-profile · experiment · report · autotune. All are functional; `autotune` is a strictly opt-in
-stretch goal (pass --enable). Everything no-ops gracefully off Arm / without a llama.cpp build.
+Subcommands: setup-engine, info, smoke, download, run, bench, ttft, throughput, profile,
+experiment, perplexity, report, autotune. `autotune` is opt-in (--enable). Everything else
+no-ops off Arm or without a llama.cpp build.
 """
 
 from __future__ import annotations
@@ -37,6 +37,22 @@ def info() -> None:
     table.add_row("version", __version__)
     table.add_row("platform", platform_tag())
     table.add_row("arm linux", "yes" if is_arm_linux() else "no (Arm-only tools will no-op)")
+    try:  # ISA evidence up front (Linux): dotprod/i8mm/sve are the kernels' entry ticket
+        cpuinfo = Path("/proc/cpuinfo")
+        if cpuinfo.exists():
+            text = cpuinfo.read_text(encoding="utf-8", errors="replace")
+            feats = next(
+                (
+                    ln.split(":", 1)[1].strip()
+                    for ln in text.splitlines()
+                    if ln.lower().startswith("features")
+                ),
+                "",
+            )
+            if feats:
+                table.add_row("cpu features", feats[:160])
+    except OSError:
+        pass
 
     cli = llama_cpp.find_binary("cli")
     bench = llama_cpp.find_binary("bench")
@@ -51,7 +67,7 @@ def info() -> None:
         table.add_row("smoke model", f"{models.default_smoke}:{models.default_smoke_variant}")
         table.add_row("default instance", instances.default_instance)
         table.add_row("default workload", workloads.default_workload)
-    except Exception as exc:  # config problems shouldn't crash `info`
+    except Exception as exc:  # bad config shouldn't crash `info`
         table.add_row("config", f"[red]error: {exc}[/]")
 
     console.print(table)
@@ -60,11 +76,14 @@ def info() -> None:
 @main.command()
 @click.option("--no-download", is_flag=True, help="Skip the model download step.")
 @click.option("-n", "--n-predict", default=24, show_default=True, help="Tokens to generate.")
-def smoke(no_download: bool, n_predict: int) -> None:
+@click.option(
+    "--timeout", default=90.0, show_default=True, help="Seconds before the run is aborted."
+)
+def smoke(no_download: bool, n_predict: int, timeout: float) -> None:
     """Download the tiny model + run llama.cpp once (proves the pipeline on any machine)."""
     from .runner import smoke as run_smoke
 
-    sys.exit(run_smoke(download=not no_download, n_predict=n_predict))
+    sys.exit(run_smoke(download=not no_download, n_predict=n_predict, timeout=timeout))
 
 
 @main.command()
@@ -298,7 +317,14 @@ def profile(prompt_len, model_id, variant, threads, no_download) -> None:
 @click.option("--no-download", is_flag=True, help="Require models cached; don't download.")
 @click.option("--no-report", is_flag=True, help="Don't render the report afterwards.")
 @click.option("--instance", "instance_name", default=None, help="Instance for the $/M-token cost.")
-def experiment(name, no_quality, no_download, no_report, instance_name) -> None:
+@click.option(
+    "--rounds",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Interleave the configs N times (A,B,A,B,...); the report medians per label.",
+)
+def experiment(name, no_quality, no_download, no_report, instance_name, rounds) -> None:
     """Run a before/after optimization experiment (quant/threads/pinning/KleidiAI) + quality."""
     from .runner import experiment as run_exp
 
@@ -309,6 +335,36 @@ def experiment(name, no_quality, no_download, no_report, instance_name) -> None:
             download=not no_download,
             render=not no_report,
             instance_name=instance_name,
+            rounds=rounds,
+        )
+    )
+
+
+@main.command()
+@click.option(
+    "--file",
+    "corpus_file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Text corpus (default: the repo's README + docs, identical across configs).",
+)
+@click.option("--chunks", type=int, default=8, show_default=True, help="Perplexity chunks.")
+@click.option("--model", "model_id", default=None, help="Model id (default: smoke model).")
+@click.option("--variant", default=None, help="Quant variant (default: model's default).")
+@click.option("--threads", type=int, default=None, help="Thread count (default: auto).")
+@click.option("--no-download", is_flag=True, help="Require the model cached; don't download.")
+def perplexity(corpus_file, chunks, model_id, variant, threads, no_download) -> None:
+    """Perplexity guardrail via llama-perplexity — finer than the probe (lower = better)."""
+    from .runner import perplexity as run_ppl
+
+    sys.exit(
+        run_ppl(
+            model_id=model_id,
+            variant=variant,
+            corpus_file=corpus_file,
+            chunks=chunks,
+            threads=threads,
+            download=not no_download,
         )
     )
 

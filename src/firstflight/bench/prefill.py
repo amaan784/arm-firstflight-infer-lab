@@ -1,8 +1,7 @@
-"""Prefill / TTFT benchmark — the headline angle.
+"""Prefill / TTFT benchmark.
 
-Long-context *prefill* (prompt processing) is what agentic/RAG apps feel as time-to-first-
-token. We drive `llama-bench` across a sweep of prompt lengths so prefill scaling is visible,
-and derive TTFT from prefill throughput.
+Prefill (prompt processing) is what agentic/RAG apps feel as time-to-first-token. Drives
+`llama-bench` over a sweep of prompt lengths, then derives TTFT from prefill throughput.
 
 llama-bench flags (verified 2026-06-26):
   -p/--n-prompt <n[,n...]>   prompt-processing tokens (prefill)   [default 512]
@@ -15,17 +14,22 @@ llama-bench flags (verified 2026-06-26):
   -ub/--ubatch-size <n>                    physical micro-batch     [default 512]
   -fa/--flash-attn <on|off|auto>           flash attention          [default auto]
                                            (all verified against the real b9873 binary 2026-07-07)
+  --prio <-1|0|1|2|3>                      process/thread priority  [default 0]
+  -mmp/--mmap <0|1>                        mmap the model           [default 1]
+  --delay <seconds>                        pause between tests      [default 0]
+                                           (verified on the real b9873 binary 2026-08-09)
   --no-warmup                              warm-up runs are ON by default; this disables them
 
-llama-bench emits one row per test: a prompt-processing (pp) row has n_prompt>0, n_gen==0;
-a token-generation (tg) row has n_gen>0, n_prompt==0. The JSON is a top-level array of row
-objects; each row also carries samples_ns / samples_ts arrays (per-repetition raw samples).
+One row per test: a prompt-processing (pp) row has n_prompt>0, n_gen==0; a token-generation
+(tg) row has n_gen>0, n_prompt==0. The JSON is a top-level array of row objects; each row
+also carries samples_ns / samples_ts (per-repetition raw samples).
 """
 
 from __future__ import annotations
 
 import json
 import platform
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,10 +37,10 @@ from ..util import is_arm_linux, machine
 from .memory import run_with_peak_rss
 from .result import BenchPoint, EngineInfo, HostInfo, ModelInfo, SweepResult
 
-# --- llama-bench JSON field names (verified vs real b9873; centralized for correction) -----
+# llama-bench JSON field names, verified vs real b9873. One place to fix if they drift.
 # Source: tools/llama-bench/llama-bench.cpp (json printer) + tools/llama-bench/README.md
-F_AVG_TS = "avg_ts"  # average tokens/sec
-F_STD_TS = "stddev_ts"  # stddev of tokens/sec across repetitions
+F_AVG_TS = "avg_ts"
+F_STD_TS = "stddev_ts"  # across repetitions
 F_N_PROMPT = "n_prompt"
 F_N_GEN = "n_gen"
 F_THREADS = "n_threads"
@@ -50,10 +54,10 @@ F_BACKENDS = "backends"
 
 
 class BenchError(RuntimeError):
-    """A llama-bench run failed (non-zero exit / unparseable output)."""
+    """llama-bench run failed: non-zero exit or unparseable output."""
 
 
-# --- command building ---------------------------------------------------------
+# --- command building ---
 
 
 def build_llama_bench_command(
@@ -70,15 +74,19 @@ def build_llama_bench_command(
     cache_type_v: str = "",
     ubatch_size: int | None = None,
     flash_attn: str = "",
+    prio: int | None = None,
+    mmap: bool | None = None,
+    delay: int | None = None,
 ) -> list[str]:
-    """Construct a `llama-bench` invocation for a prefill/generation sweep.
+    """Build a `llama-bench` invocation for a prefill/generation sweep.
 
-    Comma-joined lists let one call cover the whole context sweep. `output="json"` yields a
-    machine-readable array we parse into bench/results/*.json. Experiment axes: `cpu_mask`
-    (hex) + `cpu_strict` = pinning; `cache_type_k`/`cache_type_v` (e.g. "q8_0") = quantized
-    KV-cache; `ubatch_size` (-ub) = prefill micro-batch (bigger tiles for the GEMM kernels);
-    `flash_attn` = "on"/"off"/"auto". NOTE: quantized KV-cache should run with flash_attn="on"
-    — without FA the cache is dequantized every attention step and can be slower than f16.
+    Comma-joined lists cover the whole context sweep in one call. output="json" gives the
+    array parsed into bench/results/*.json. Experiment axes: cpu_mask (hex) + cpu_strict =
+    pinning; cache_type_k/cache_type_v (e.g. "q8_0") = quantized KV-cache; ubatch_size (-ub)
+    = prefill micro-batch, i.e. bigger tiles for the GEMM kernels; flash_attn = on/off/auto.
+
+    Run quantized KV-cache with flash_attn="on". Without FA the cache is dequantized every
+    attention step and can come out slower than f16.
     """
     if not prompt_lengths:
         raise ValueError("prompt_lengths must be non-empty for a prefill sweep")
@@ -109,28 +117,37 @@ def build_llama_bench_command(
         cmd += ["-ub", str(ubatch_size)]
     if flash_attn:
         cmd += ["-fa", flash_attn]
+    # Measurement-steadiness flags (all verified on the real b9873 binary, 2026-08-09):
+    # --prio 2 resists co-tenant scheduling noise, -mmp 0 makes peak RSS honest malloc
+    # (no lazily-paged mapped file) at some load-time cost, --delay settles between tests.
+    if prio is not None:
+        cmd += ["--prio", str(prio)]
+    if mmap is not None:
+        cmd += ["-mmp", "1" if mmap else "0"]
+    if delay:
+        cmd += ["--delay", str(delay)]
     return cmd
 
 
-# --- derivations --------------------------------------------------------------
+# --- derivations ---
 
 
 def ttft_seconds(prefill_tok_s: float, prompt_tokens: int) -> float:
-    """Derive time-to-first-token from prefill throughput.
+    """TTFT derived from prefill throughput. +inf when throughput is non-positive.
 
-    TTFT ≈ prompt_tokens / prefill_throughput (the prompt must be processed before the
-    first token is emitted). Returns +inf when throughput is non-positive.
+    TTFT ~= prompt_tokens / prefill_throughput, since the whole prompt has to be processed
+    before the first token comes out.
     """
     if prefill_tok_s <= 0:
         return float("inf")
     return prompt_tokens / prefill_tok_s
 
 
-# --- parsing ------------------------------------------------------------------
+# --- parsing ---
 
 
 def parse_rows(data: str | list) -> list[dict]:
-    """Parse `llama-bench -o json` output into a list of row dicts."""
+    """`llama-bench -o json` output as row dicts."""
     obj = json.loads(data) if isinstance(data, str) else data
     if not isinstance(obj, list):
         raise BenchError(f"expected a JSON array from llama-bench, got {type(obj).__name__}")
@@ -148,18 +165,20 @@ def row_kind(row: dict) -> str:
 
 
 def rows_to_points(rows: list[dict]) -> list[BenchPoint]:
-    """Convert llama-bench rows into BenchPoints, deriving TTFT for prefill rows."""
+    """llama-bench rows as BenchPoints. TTFT derived for prefill rows."""
     points: list[BenchPoint] = []
     for row in rows:
         kind = row_kind(row)
         if kind == "mixed":
-            continue  # skip rows that are neither a clean pp nor tg test
+            continue  # neither a clean pp nor tg test
         n_prompt = int(row.get(F_N_PROMPT, 0) or 0)
         n_gen = int(row.get(F_N_GEN, 0) or 0)
         avg_ts = float(row.get(F_AVG_TS, 0.0) or 0.0)
         std_ts = float(row.get(F_STD_TS, 0.0) or 0.0)
         threads = int(row.get(F_THREADS, 0) or 0)
         ttft = ttft_seconds(avg_ts, n_prompt) if kind == "pp" else None
+        raw = row.get("samples_ts") or []
+        samples = [float(x) for x in raw if isinstance(x, (int, float))]
         points.append(
             BenchPoint(
                 kind=kind,
@@ -169,13 +188,14 @@ def rows_to_points(rows: list[dict]) -> list[BenchPoint]:
                 throughput_stddev=std_ts,
                 ttft_s=ttft,
                 threads=threads,
+                samples_ts=samples,
             )
         )
     return points
 
 
 def _meta_from_rows(rows: list[dict]) -> tuple[EngineInfo, ModelInfo, str, int]:
-    """Pull engine/model/cpu metadata (constant across rows) from the first row."""
+    """engine/model/cpu metadata off the first row. Constant across rows."""
     first = rows[0] if rows else {}
     build_number = first.get(F_BUILD_NUMBER)
     engine = EngineInfo(
@@ -184,7 +204,7 @@ def _meta_from_rows(rows: list[dict]) -> tuple[EngineInfo, ModelInfo, str, int]:
         backends=str(first.get(F_BACKENDS, "")),
     )
     model = ModelInfo(
-        id="",  # filled by caller (config id, not in llama-bench output)
+        id="",  # config id, filled by caller; not in llama-bench output
         variant="",
         filename=str(first.get(F_MODEL_FILENAME, "")),
         size_bytes=_maybe_int(first.get(F_MODEL_SIZE)),
@@ -203,10 +223,10 @@ def _maybe_int(value) -> int | None:
 
 
 def read_thp_mode() -> str:
-    """Linux transparent-hugepage mode, e.g. 'madvise' — captured as run evidence.
+    """Linux transparent-hugepage mode, e.g. 'madvise'. Empty off-Linux or unreadable.
 
-    AWS's Graviton perf runbook recommends THP always/madvise for large weight working sets;
-    recording the actual state makes runs comparable. Returns "" off-Linux/unreadable.
+    AWS's Graviton perf runbook recommends THP always/madvise for large weight working sets,
+    so record the actual state to keep runs comparable.
     """
     try:
         text = Path("/sys/kernel/mm/transparent_hugepage/enabled").read_text(encoding="ascii")
@@ -218,7 +238,7 @@ def read_thp_mode() -> str:
     return text.strip()
 
 
-# --- the sweep ----------------------------------------------------------------
+# --- the sweep ---
 
 
 def run_sweep(
@@ -239,12 +259,15 @@ def run_sweep(
     cache_type_v: str = "",
     ubatch_size: int | None = None,
     flash_attn: str = "",
-    timeout: float = 3600.0,
+    timeout: float = 7200.0,
+    prio: int | None = 2,
+    mmap: bool | None = False,
+    delay: int | None = 2,
 ) -> SweepResult:
-    """Run the prefill/generation sweep and return a structured result.
+    """Run the prefill/generation sweep. Raises BenchError if the run fails.
 
-    Raises BenchError on a failed run. Callers should have already verified `bench_bin`
-    exists (off-Arm / no-binary is a clean CLI skip, not an exception).
+    Callers must have already checked that bench_bin exists. Off-Arm / no-binary is a CLI
+    skip, not an exception.
     """
     cmd = build_llama_bench_command(
         bench_bin,
@@ -260,8 +283,16 @@ def run_sweep(
         cache_type_v=cache_type_v,
         ubatch_size=ubatch_size,
         flash_attn=flash_attn,
+        prio=prio,
+        mmap=mmap,
+        delay=delay,
     )
-    returncode, stdout, stderr, peak = run_with_peak_rss(cmd, timeout=timeout)
+    try:
+        returncode, stdout, stderr, peak = run_with_peak_rss(cmd, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        # A stuck/slow sweep must not take down the whole run: raise BenchError so the
+        # experiment loop skips this config and every later step (incl. report) still runs.
+        raise BenchError(f"llama-bench timed out after {timeout:.0f}s: {cmd[0]}") from exc
     if returncode != 0:
         tail = stderr.strip()[-1200:]
         raise BenchError(f"llama-bench exited {returncode}\n{tail}")

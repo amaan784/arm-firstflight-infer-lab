@@ -1,15 +1,15 @@
-"""Render the before/after report — the WOW artifact.
+"""Render the before/after report.
 
 Reads `bench/results/*.json` and emits a one-page report in two forms:
-  - standalone HTML (`bench/reports/*.html`) — self-contained, charts inlined as base64 PNG
-  - markdown (`bench/reports/*.md`) — diff-friendly, references sibling PNG charts
+  - standalone HTML (`bench/reports/*.html`): self-contained, charts inlined as base64 PNG
+  - markdown (`bench/reports/*.md`): diff-friendly, references sibling PNG charts
 
-The report LEADS with the headline result (best before/after prefill-TTFT delta, or the
-long-context prefill number for a single run), then metric cards, charts, and tables for
-prefill scaling, throughput, peak memory, and **$/M tokens** (via `cost.py` + `instances.yaml`).
+Leads with the headline (best before/after prefill-TTFT delta, or the long-context prefill
+number for a single run), then metric cards, charts, and tables for prefill scaling,
+throughput, peak memory, and $/M tokens (via `cost.py` + `instances.yaml`).
 
-matplotlib + jinja2 come from the `[report]` extra and are imported lazily, so loading this
-module (and `firstflight report` with no results) works without them.
+matplotlib and jinja2 come from the `[report]` extra and are imported lazily, so importing
+this module (and `firstflight report` with no results) works without them.
 """
 
 from __future__ import annotations
@@ -39,11 +39,10 @@ class ReportError(RuntimeError):
 
 
 def _is_committed_example(path: Path) -> bool:
-    """The repo ships synthetic example_*.json / profile_example.json for illustration.
+    """Synthetic example_*.json / profile_example.json shipped in the repo for illustration.
 
-    They must NEVER mix into a real report (they would force the DEMO banner and become the
-    headline baseline), so the loaders skip them whenever any real result is present-or-not —
-    the demo path injects synthetic data explicitly instead of reading these files.
+    These must never mix into a real report: they would force the DEMO banner and become the
+    headline baseline. The demo path injects synthetic data instead of reading these files.
     """
     return path.name.startswith("example_") or path.name == "profile_example.json"
 
@@ -53,10 +52,10 @@ _OTHER_PREFIXES = ("profile_", "ttft_", "throughput_", "autotune_")
 
 
 def load_results(source: Path | None = None) -> list[SweepResult]:
-    """Load real SweepResults from a directory (default bench/results), sorted by timestamp.
+    """Real SweepResults from a directory (default bench/results), sorted by timestamp.
 
-    Committed synthetic examples (example_*.json) are excluded — see _is_committed_example.
-    Non-sweep result files (profile_/ttft_/throughput_/autotune_) are skipped explicitly.
+    Skips committed synthetic examples (see _is_committed_example) and non-sweep result files
+    (profile_/ttft_/throughput_/autotune_).
     """
     source = source or results_dir()
     files = sorted(source.glob("*.json")) if source.is_dir() else [source]
@@ -73,7 +72,7 @@ def load_results(source: Path | None = None) -> list[SweepResult]:
 
 
 def load_ttft_results(source: Path | None = None) -> list:
-    """Load measured-TTFT results (ttft_*.json), oldest->newest."""
+    """Measured-TTFT results (ttft_*.json), oldest->newest."""
     from ..bench.ttft import TtftResult
 
     source = source or results_dir()
@@ -92,7 +91,7 @@ def load_ttft_results(source: Path | None = None) -> list:
 
 
 def load_throughput_results(source: Path | None = None) -> list:
-    """Load concurrency-sweep results (throughput_*.json), oldest->newest."""
+    """Concurrency-sweep results (throughput_*.json), oldest->newest."""
     from ..bench.throughput import ThroughputResult
 
     source = source or results_dir()
@@ -111,7 +110,7 @@ def load_throughput_results(source: Path | None = None) -> list:
 
 
 def load_profiles(source: Path | None = None) -> list[ProfileResult]:
-    """Load Performix profile JSONs (profile_*.json) from a directory, sorted by timestamp."""
+    """Performix profile JSONs (profile_*.json), sorted by timestamp."""
     source = source or results_dir()
     if not source.is_dir():
         return []
@@ -144,6 +143,7 @@ class ResultRow:
     quality_counts: tuple[int, int] | None = None  # (n_correct, n_total)
     kleidiai: bool | None = None  # detected-active (proof), None = unknown
     experiment: str = ""  # which experiment produced this row ("" = ad-hoc)
+    ppl: float | None = None  # perplexity over the fixed corpus (lower = better)
 
 
 @dataclass
@@ -170,6 +170,116 @@ class ReportModel:
     ttft_runs: list = field(default_factory=list)  # measured-TTFT (bench/ttft.py) results
     throughput_runs: list = field(default_factory=list)  # concurrency sweeps (bench/throughput.py)
     duplicates_dropped: list = field(default_factory=list)  # older same-label runs superseded
+    kernel_evidence: list = field(default_factory=list)  # per-label weight-buffer lines
+    system_info: str = ""  # ggml system_info flags from a real run
+    cpu_features: str = ""  # /proc/cpuinfo Features line
+
+
+def _consolidate(results: list[SweepResult]) -> tuple[list[SweepResult], list[str]]:
+    """Collapse duplicates by (experiment, label).
+
+    Experiment runs: several results per label are interleaved ROUNDS (`--rounds N`) —
+    aggregate to the median per point with the between-round spread as the stddev (the
+    honest error bar on a shared runner). Ad-hoc runs (experiment ""): newest wins and the
+    older ones are listed as superseded, since a stale ad-hoc rerun may not be the same setup.
+    """
+    by_key: dict[tuple[str, str], list[SweepResult]] = {}
+    for r in results:
+        by_key.setdefault((r.experiment, r.label), []).append(r)
+    merged: list[SweepResult] = []
+    dropped: list[str] = []
+    for (exp, label), group in by_key.items():
+        if len(group) == 1:
+            merged.append(group[0])
+        elif exp:
+            merged.append(_median_of_rounds(group))
+            dropped.append(f"{label}: median of {len(group)} rounds (spread = between-round)")
+        else:
+            for stale in group[:-1]:
+                dropped.append(f"{label} @ {stale.timestamp}")
+            merged.append(group[-1])
+    return merged, dropped
+
+
+def _baseline_and_rivals(results: list[SweepResult]) -> tuple[SweepResult, list[SweepResult]]:
+    """Pick the headline baseline and the results it may be compared against.
+
+    "baseline" wins; the attribution ladder's "generic" floor is the fallback name. Rivals
+    come only from the baseline's own experiment: the global best would attribute a compound
+    win (e.g. a KleidiAI build AND a bigger micro-batch) to a single change.
+    """
+    baseline = next(
+        (r for r in results if r.label.lower() == "baseline"),
+        next((r for r in results if r.label.lower() == "generic"), results[0]),
+    )
+    others = [
+        r
+        for r in results
+        if r is not baseline and (not baseline.experiment or r.experiment == baseline.experiment)
+    ]
+    return baseline, others
+
+
+def _headline_pair(results: list[SweepResult]):
+    """(baseline, best, ctx) for annotation; best is None when no comparison exists."""
+    if not results:
+        return None, None, None
+    baseline, others = _baseline_and_rivals(results)
+    base_map = _prefill_map(baseline)
+    best, best_ctx = None, None
+    for cand in others:
+        cand_map = _prefill_map(cand)
+        shared = sorted(set(base_map) & set(cand_map))
+        if not shared:
+            continue
+        ctx = shared[-1]
+        if (
+            best is None
+            or cand_map[ctx].throughput_tok_s > _prefill_map(best)[ctx].throughput_tok_s
+        ):
+            best, best_ctx = cand, ctx
+    return baseline, best, best_ctx
+
+
+def _median_of_rounds(group: list[SweepResult]) -> SweepResult:
+    """Collapse interleaved rounds of one config into a single result.
+
+    Per point: median tok/s across rounds; stddev = between-round spread (pstdev), which is
+    the error bar that matters on a shared runner. Newest round supplies the metadata.
+    """
+    import statistics
+    from dataclasses import replace
+
+    base = group[-1]
+    order: list[tuple] = []
+    per_key: dict[tuple, list[BenchPoint]] = {}
+    for r in group:
+        for p in r.points:
+            k = (p.kind, p.n_prompt, p.n_gen)
+            if k not in per_key:
+                order.append(k)
+            per_key.setdefault(k, []).append(p)
+    points: list[BenchPoint] = []
+    for k in order:
+        pts = per_key[k]
+        tputs = [p.throughput_tok_s for p in pts]
+        med = statistics.median(tputs)
+        spread = statistics.pstdev(tputs) if len(tputs) > 1 else pts[-1].throughput_stddev
+        ttft = None
+        if k[0] == "pp":
+            ttft = (k[1] / med) if med > 0 else float("inf")
+        points.append(
+            replace(
+                pts[-1],
+                throughput_tok_s=med,
+                throughput_stddev=spread,
+                ttft_s=ttft,
+                samples_ts=[t for p in pts for t in p.samples_ts] or [round(t, 3) for t in tputs],
+            )
+        )
+    peak = max((r.peak_rss_bytes or 0) for r in group) or None
+    quality = next((r.quality for r in reversed(group) if r.quality), None)
+    return replace(base, points=points, peak_rss_bytes=peak, quality=quality)
 
 
 def _prefill_map(r: SweepResult) -> dict[int, BenchPoint]:
@@ -209,6 +319,14 @@ def _fmt_quality(counts: tuple[int, int] | None, acc: float | None) -> str:
     return f"{acc:.0%}" if acc is not None else "-"
 
 
+def _fmt_quality_row(r: ResultRow) -> str:
+    """Probe counts plus perplexity when measured, e.g. '32/40 · ppl 12.41'."""
+    base = _fmt_quality(r.quality_counts, r.quality_acc)
+    if r.ppl is not None:
+        base = f"{base} · ppl {r.ppl:.2f}" if base != "-" else f"ppl {r.ppl:.2f}"
+    return base
+
+
 def _prompt_tput_max_ctx(r: SweepResult) -> tuple[float, int]:
     """Prefill throughput at this result's LARGEST context (the headline regime)."""
     pts = r.prefill_points
@@ -235,27 +353,16 @@ def build_report_model(
     if not results:
         raise ReportError("no results to render")
 
-    # Honesty: if any result is synthetic, force the DEMO banner even outside --demo mode
-    # (e.g. when rendering the committed example results).
+    # Any synthetic result forces the DEMO banner, even outside --demo (e.g. committed examples).
     demo = demo or any("SYNTHETIC" in (r.host.cpu_info or "") for r in results)
 
-    # De-duplicate labels, keeping the NEWEST run per label (results are timestamp-sorted).
-    # Otherwise re-running `bench --label baseline` yields duplicate columns showing mixed
-    # data, and the headline could compare against a stale run.
-    by_label: dict[str, SweepResult] = {}
-    dropped: list[str] = []
-    for r in results:
-        if r.label in by_label:
-            dropped.append(f"{r.label} @ {by_label[r.label].timestamp}")
-        by_label[r.label] = r
-    results = list(by_label.values())
+    results, dropped = _consolidate(results)
 
     price = instance.usd_per_hour
     priced = price > 0
 
-    # Per-result summary rows. Two cost views: $/M generated tokens (gen throughput) and
-    # $/M PROMPT tokens (prefill throughput at the row's largest context — the metric that
-    # matches the prefill/TTFT headline).
+    # Two cost views per row: $/M generated tokens (gen throughput) and $/M prompt tokens
+    # (prefill throughput at the row's largest context, which matches the prefill/TTFT headline).
     rows: list[ResultRow] = []
     for r in results:
         p_tput, _p_ctx = _prompt_tput_max_ctx(r)
@@ -273,6 +380,11 @@ def build_report_model(
                 quality_counts=_quality_counts(r.quality),
                 kleidiai=r.host.kleidiai,
                 experiment=r.experiment,
+                ppl=(
+                    float(r.quality["ppl"])
+                    if isinstance(r.quality, dict) and r.quality.get("ppl")
+                    else None
+                ),
             )
         )
 
@@ -287,15 +399,15 @@ def build_report_model(
             pt = maps[r.label].get(ctx)
             cells[r.label] = {
                 "ttft": _fmt_ttft(pt.ttft_s) if pt else "-",
-                # tokens/sec with the spread across repetitions (honesty about noise)
+                # tok/s with the spread across repetitions, so the noise is visible
                 "tput": f"{pt.throughput_tok_s:.0f} ±{pt.throughput_stddev:.0f}" if pt else "-",
             }
         prefill_table.append({"ctx": ctx, "ctx_label": _ctx_label(ctx), "cells": cells})
 
     # Headline: comparison if a baseline + another result exist, else single-run.
-    baseline = next((r for r in results if r.label.lower() == "baseline"), results[0])
-    others = [r for r in results if r is not baseline]
-    headline_main, subs, cards = _headline(baseline, others, rows, instance, priced)
+    baseline, others = _baseline_and_rivals(results)
+    floor_pct = noise_floor_pct(results)
+    headline_main, subs, cards = _headline(baseline, others, rows, instance, priced, floor_pct)
 
     # Measured-TTFT prompt-cache evidence gets a headline sub-bullet (newest run).
     ttft_runs = list(ttft_results or [])
@@ -324,6 +436,28 @@ def build_report_model(
             profile_target = p.target
             break
 
+    # Kernel evidence: which weight buffer each config actually loaded, plus the ggml
+    # system_info / cpuinfo Features lines (identical across rows on one host; take newest).
+    kernel_evidence = []
+    for r in results:
+        if not getattr(r.host, "kernel_buffer", ""):
+            continue
+        bits = [r.host.kernel_buffer]
+        tier = getattr(r.host, "kernel_tier", "")
+        if tier:
+            bits.append(f"{tier}-tier kernels")
+        repack = getattr(r.host, "repack", None)
+        if repack is not None:
+            bits.append(f"ggml repack {'on' if repack else 'off'}")
+        kernel_evidence.append(f"{r.label}: " + ", ".join(bits))
+    system_info = next(
+        (r.host.system_info for r in reversed(results) if getattr(r.host, "system_info", "")), ""
+    )
+    cpu_features = next(
+        (r.host.cpu_features for r in reversed(results) if getattr(r.host, "cpu_features", "")),
+        "",
+    )
+
     return ReportModel(
         title=title,
         generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
@@ -347,6 +481,9 @@ def build_report_model(
         ttft_runs=ttft_runs,
         throughput_runs=list(throughput_results or []),
         duplicates_dropped=dropped,
+        kernel_evidence=kernel_evidence,
+        system_info=system_info,
+        cpu_features=cpu_features,
     )
 
 
@@ -362,7 +499,33 @@ def _quality_for(rows: list[ResultRow], label: str):
     return None, None
 
 
-def _headline(baseline, others, rows, instance, priced):
+def noise_floor_pct(results: list[SweepResult]) -> float | None:
+    """Measured same-build spread, as a percentage, from the noise-floor experiment.
+
+    Two identical configs run under different labels: any apparent 'speedup' between them is
+    the runner talking, not the treatment. Returns None when that experiment wasn't run.
+    """
+    ctrl = [r for r in results if r.experiment == "noise-floor"]
+    if len(ctrl) < 2:
+        return None
+    maps = [_prefill_map(r) for r in ctrl]
+    shared = sorted(set.intersection(*(set(m) for m in maps)))
+    spreads = []
+    for ctx in shared:
+        vals = [m[ctx].throughput_tok_s for m in maps if m[ctx].throughput_tok_s > 0]
+        if len(vals) >= 2 and min(vals) > 0:
+            spreads.append((max(vals) - min(vals)) / min(vals) * 100.0)
+    return max(spreads) if spreads else None
+
+
+def dominates_noise(speed: float, floor_pct: float | None) -> bool:
+    """Whether a speedup clears the measured noise floor. Unknown floor -> don't gate."""
+    if floor_pct is None:
+        return True
+    return (speed - 1.0) * 100.0 > floor_pct
+
+
+def _headline(baseline, others, rows, instance, priced, floor_pct=None):
     """Return (headline_main, subs, metric_cards)."""
     base_map = _prefill_map(baseline)
 
@@ -385,20 +548,29 @@ def _headline(baseline, others, rows, instance, priced):
         b = base_map[best_ctx]
         o = _prefill_map(best)[best_ctx]
         speed = (o.throughput_tok_s / b.throughput_tok_s) if b.throughput_tok_s else 0.0
+        clears = dominates_noise(speed, floor_pct)
         subs = [
             f"TTFT {_fmt_ttft(b.ttft_s)}s -> {_fmt_ttft(o.ttft_s)}s at {best_ctx:,} tokens "
             f"({best.label} vs {baseline.label})",
             f"prefill {b.throughput_tok_s:.0f} -> {o.throughput_tok_s:.0f} tok/s",
             f"generation {_gen_tput(baseline):.0f} -> {_gen_tput(best):.0f} tok/s",
         ]
+        if floor_pct is not None:
+            verdict = "clears it" if clears else "DOES NOT clear it - not claimed as a win"
+            subs.append(
+                f"measured noise floor (same build, twice): {floor_pct:.1f}% - this delta {verdict}"
+            )
         cards = [
-            (f"{speed:.2f}x", f"prefill speedup @ {_ctx_label(best_ctx)}"),
+            (
+                f"{speed:.2f}x" if clears else "within noise",
+                f"prefill speedup @ {_ctx_label(best_ctx)}",
+            ),
             (f"{_fmt_ttft(o.ttft_s)}s", f"TTFT @ {_ctx_label(best_ctx)} ({best.label})"),
             (f"{o.throughput_tok_s:.0f}", "prefill tok/s"),
         ]
         if priced:
-            # Prompt-token cost from the SAME prefill points as the headline (context-matched
-            # to the prefill story); generation cost is secondary context.
+            # Prompt cost from the same prefill points as the headline. Generation cost is
+            # secondary.
             bp = compute_cost(b.throughput_tok_s, instance.usd_per_hour)
             op = compute_cost(o.throughput_tok_s, instance.usd_per_hour)
             subs.append(
@@ -413,12 +585,12 @@ def _headline(baseline, others, rows, instance, priced):
                 )
             cards.append((op.format_usd_per_mtok(), f"$/M prompt tok @ {_ctx_label(best_ctx)}"))
         else:
-            cards.append(("set price", "$/M prompt tok"))
+            cards.append(("$0.00", "$/M prompt tok (free runner)"))
         bq, bqc = _quality_for(rows, baseline.label)
         oq, oqc = _quality_for(rows, best.label)
         if bq is not None and oq is not None:
             if bqc and oqc:
-                # one-probe-item tolerance: honest about the instrument's granularity
+                # tolerate one probe item; the instrument isn't finer than that
                 held = "held" if oqc[0] >= bqc[0] - 1 else "down"
                 subs.append(f"quality {_fmt_quality(bqc, bq)} -> {_fmt_quality(oqc, oq)} ({held})")
                 cards.append((_fmt_quality(oqc, oq), "quality (probe)"))
@@ -426,6 +598,13 @@ def _headline(baseline, others, rows, instance, priced):
                 held = "held" if oq >= bq - 0.02 else "down"
                 subs.append(f"quality {bq:.0%} -> {oq:.0%} ({held})")
                 cards.append((f"{oq:.0%}", "quality (probe)"))
+        if not clears:
+            return (
+                f"No claimed win: the best delta ({speed:.2f}x) sits inside the measured "
+                f"{floor_pct:.1f}% noise floor",
+                subs,
+                cards,
+            )
         return f"{speed:.2f}x faster prefill at {best_ctx:,}-token context", subs, cards
 
     # Single-run headline.
@@ -447,7 +626,7 @@ def _headline(baseline, others, rows, instance, priced):
         pc = compute_cost(p.throughput_tok_s, instance.usd_per_hour)
         cards.append((pc.format_usd_per_mtok(), f"$/M prompt tok @ {_ctx_label(ctx)}"))
     else:
-        cards.append(("set price", "$/M prompt tok"))
+        cards.append(("$0.00", "$/M prompt tok (free runner)"))
     return f"{p.throughput_tok_s:.0f} tok/s prefill at {ctx:,}-token context", subs, cards
 
 
@@ -481,12 +660,20 @@ def _fig_png(fig) -> bytes:
     return buf.getvalue()
 
 
-def build_charts(results: list[SweepResult], instance: InstanceSpec) -> list[Chart]:
+def build_charts(
+    results: list[SweepResult],
+    instance: InstanceSpec,
+    ttft_results: list | None = None,
+    throughput_results: list | None = None,
+    demo: bool = False,
+) -> list[Chart]:
     _require_report_deps()
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    results, _ = _consolidate(results)  # same view of rounds/duplicates as the tables
 
     plt.rcParams.update(
         {
@@ -505,12 +692,30 @@ def build_charts(results: list[SweepResult], instance: InstanceSpec) -> list[Cha
     charts: list[Chart] = []
     all_ctx = sorted({p.n_prompt for r in results for p in r.prefill_points})
 
+    def stamp_synthetic(ax):
+        # Baked into the pixels: this image gets copied out of context (README, galleries),
+        # where the report's DEMO banner can't follow it.
+        if demo:
+            ax.text(
+                0.5,
+                0.5,
+                "SYNTHETIC DEMO DATA",
+                transform=ax.transAxes,
+                fontsize=34,
+                color="#fa5252",
+                alpha=0.22,
+                ha="center",
+                va="center",
+                rotation=20,
+                fontweight="bold",
+                zorder=0,
+            )
+
     def line_chart(name, title, ylabel, value_fn):
         fig, ax = plt.subplots(figsize=(7.2, 4.0))
         for i, r in enumerate(results):
             pts = sorted(r.prefill_points, key=lambda p: p.n_prompt)
-            # Skip missing/non-finite values entirely — plotting them as 0.0 would draw a
-            # misleading dip to zero.
+            # Skip missing/non-finite values; plotting them as 0.0 draws a fake dip to zero.
             pairs = []
             for p in pts:
                 v = value_fn(p)
@@ -532,17 +737,102 @@ def build_charts(results: list[SweepResult], instance: InstanceSpec) -> list[Cha
             ax.minorticks_off()
         if len(results) > 1:
             ax.legend()
+        stamp_synthetic(ax)
         fig.tight_layout()
         png = _fig_png(fig)
         plt.close(fig)
         charts.append(Chart(name, title, png))
 
-    line_chart(
-        "prefill-ttft",
-        "Prefill TTFT vs context length (lower is better; derived)",
-        "time-to-first-token (s, derived)",
-        lambda p: p.ttft_s,
-    )
+    # Hero chart: annotated before/after TTFT with the saved time shaded and the speedup
+    # called out. Falls back to the plain line chart when there's nothing to compare.
+    hero_done = False
+    pair_base, pair_best, pair_ctx = _headline_pair(results)
+    if pair_best is not None and pair_ctx is not None:
+        bmap, omap = _prefill_map(pair_base), _prefill_map(pair_best)
+        shared = sorted(
+            c
+            for c in set(bmap) & set(omap)
+            if bmap[c].ttft_s
+            and omap[c].ttft_s
+            and math.isfinite(bmap[c].ttft_s)
+            and math.isfinite(omap[c].ttft_s)
+        )
+        if len(shared) >= 2:
+            xs = shared
+            ys_b = [bmap[c].ttft_s for c in xs]
+            ys_o = [omap[c].ttft_s for c in xs]
+            speed = (
+                omap[pair_ctx].throughput_tok_s / bmap[pair_ctx].throughput_tok_s
+                if bmap[pair_ctx].throughput_tok_s
+                else 0.0
+            )
+            saved = (bmap[pair_ctx].ttft_s or 0) - (omap[pair_ctx].ttft_s or 0)
+            fig, ax = plt.subplots(figsize=(11, 6.2))
+            ax.plot(xs, ys_b, marker="o", linewidth=2.6, color=PALETTE[0], label=pair_base.label)
+            ax.plot(xs, ys_o, marker="o", linewidth=2.6, color=PALETTE[1], label=pair_best.label)
+            ax.fill_between(xs, ys_b, ys_o, color=PALETTE[1], alpha=0.12)
+            ax.annotate(
+                f"{speed:.2f}x faster\n{saved:.1f}s saved per prompt",
+                xy=(pair_ctx, (ys_b[-1] + ys_o[-1]) / 2),
+                xytext=(0.55, 0.55),
+                textcoords="axes fraction",
+                fontsize=15,
+                fontweight="bold",
+                color="#1971c2",
+                arrowprops={"arrowstyle": "->", "color": "#1971c2"},
+            )
+            ax.annotate(
+                f"{ys_b[-1]:.1f}s",
+                xy=(xs[-1], ys_b[-1]),
+                xytext=(-8, 8),
+                textcoords="offset points",
+                ha="right",
+                fontweight="bold",
+                color=PALETTE[0],
+            )
+            ax.annotate(
+                f"{ys_o[-1]:.1f}s",
+                xy=(xs[-1], ys_o[-1]),
+                xytext=(-8, -14),
+                textcoords="offset points",
+                ha="right",
+                fontweight="bold",
+                color=PALETTE[1],
+            )
+            ax.set_xscale("log", base=2)
+            ax.set_xlabel("context length (prompt tokens)")
+            ax.set_ylabel("time-to-first-token (s)")
+            title = (
+                f"Prefill TTFT: {speed:.2f}x faster at {_ctx_label(pair_ctx)} context "
+                f"({pair_best.label} vs {pair_base.label})"
+            )
+            ax.set_title(title)
+            if all_ctx:
+                ax.set_xticks(all_ctx)
+                ax.set_xticklabels([_ctx_label(x) for x in all_ctx])
+                ax.minorticks_off()
+            ax.legend(loc="upper left")
+            stamp_synthetic(ax)
+            fig.text(
+                0.01,
+                0.005,
+                "TTFT derived as prompt_tokens / prefill throughput; excludes tokenization "
+                "and model load. See docs/METHODOLOGY.md.",
+                fontsize=8,
+                color="#868e96",
+            )
+            fig.tight_layout()
+            png = _fig_png(fig)
+            plt.close(fig)
+            charts.append(Chart("prefill-ttft", title, png))
+            hero_done = True
+    if not hero_done:
+        line_chart(
+            "prefill-ttft",
+            "Prefill TTFT vs context length (lower is better; derived)",
+            "time-to-first-token (s, derived)",
+            lambda p: p.ttft_s,
+        )
     line_chart(
         "prefill-throughput",
         "Prefill throughput vs context length (higher is better)",
@@ -550,9 +840,92 @@ def build_charts(results: list[SweepResult], instance: InstanceSpec) -> list[Cha
         lambda p: p.throughput_tok_s,
     )
 
-    # Cost bar chart only when priced. PROMPT-token cost (prefill throughput at each result's
-    # largest context) — the metric matching the prefill/TTFT headline. Non-finite costs
-    # (no prefill points) are skipped rather than plotted.
+    # Which lever mattered: best prefill speedup per experiment axis, sorted, with the
+    # no-change line at 1.0. The noise-floor bar sits at ~1.0 by construction and is the
+    # yardstick every other bar has to clear. Negative results plot honestly left of 1.0.
+    by_exp: dict[str, list[SweepResult]] = {}
+    for r in results:
+        if r.experiment:
+            by_exp.setdefault(r.experiment, []).append(r)
+    levers: list[tuple[str, float]] = []
+    for exp, group in by_exp.items():
+        if len(group) < 2:
+            continue
+        base = group[0]  # first-run config = that experiment's own "before"
+        bmap = _prefill_map(base)
+        best_ratio, best_label = None, ""
+        for cand in group[1:]:
+            cmap = _prefill_map(cand)
+            shared = sorted(set(bmap) & set(cmap))
+            if not shared:
+                continue
+            ctx = shared[-1]
+            if bmap[ctx].throughput_tok_s > 0:
+                ratio = cmap[ctx].throughput_tok_s / bmap[ctx].throughput_tok_s
+                if best_ratio is None or ratio > best_ratio:
+                    best_ratio, best_label = ratio, cand.label
+        if best_ratio is not None:
+            levers.append((f"{exp}  ({best_label} / {base.label})", best_ratio))
+    if levers:
+        levers.sort(key=lambda t: t[1])
+        names = [n for n, _ in levers]
+        vals = [v for _, v in levers]
+        fig, ax = plt.subplots(figsize=(8.8, 1.0 + 0.55 * len(levers)))
+        bars = ax.barh(names, vals, color=[PALETTE[1] if v >= 1.0 else "#e03131" for v in vals])
+        ax.axvline(1.0, color="#495057", linewidth=1.2, linestyle="--")
+        ax.bar_label(bars, fmt="%.2fx", padding=3)
+        ax.set_xlabel("prefill speedup at largest shared context (1.0 = no change)")
+        ax.set_title("Which lever mattered - best speedup per experiment axis")
+        fig.tight_layout()
+        png = _fig_png(fig)
+        plt.close(fig)
+        charts.append(Chart("levers", "Which lever mattered", png))
+
+    # Prompt-cache evidence: cold vs warm server-measured prefill, one glance.
+    if ttft_results:
+        t = ttft_results[-1]
+        fig, ax = plt.subplots(figsize=(6.6, 3.8))
+        bars = ax.bar(
+            ["cold (full prefix)", "warm (cache hit)"],
+            [t.cold.prompt_ms, t.warm.prompt_ms],
+            color=[PALETTE[0], PALETTE[1]],
+        )
+        ax.bar_label(bars, fmt="%.0f ms", padding=3)
+        ax.set_ylabel("server-measured prefill time (ms)")
+        title = f"Prompt cache: {t.reduction_pct:.0f}% of prefill skipped on the warm turn"
+        ax.set_title(title)
+        fig.tight_layout()
+        png = _fig_png(fig)
+        plt.close(fig)
+        charts.append(Chart("prompt-cache", title, png))
+
+    # Concurrency: aggregate tok/s as parallel requests scale.
+    if throughput_results:
+        run = throughput_results[-1]
+        pts = sorted(run.points, key=lambda p: p.parallel)
+        if pts:
+            xs = [p.parallel for p in pts]
+            fig, ax = plt.subplots(figsize=(7.2, 4.0))
+            for label, ys, color in (
+                ("total", [p.speed for p in pts], PALETTE[0]),
+                ("prefill", [p.speed_pp for p in pts], PALETTE[1]),
+                ("generation", [p.speed_tg for p in pts], PALETTE[2 % len(PALETTE)]),
+            ):
+                if any(y > 0 for y in ys):
+                    ax.plot(xs, ys, marker="o", linewidth=2.2, color=color, label=label)
+            ax.set_xticks(xs)
+            ax.set_xlabel("parallel requests")
+            ax.set_ylabel("aggregate tokens/sec")
+            title = f"Throughput vs parallel requests ({run.model}:{run.variant})"
+            ax.set_title(title)
+            ax.legend()
+            fig.tight_layout()
+            png = _fig_png(fig)
+            plt.close(fig)
+            charts.append(Chart("concurrency", title, png))
+
+    # Cost bars only when priced. Prompt-token cost (prefill throughput at each result's largest
+    # context), matching the prefill/TTFT headline. Non-finite costs are skipped, not plotted.
     if instance.usd_per_hour > 0:
         labels, costs = [], []
         for r in results:
@@ -620,7 +993,7 @@ def build_markdown(model: ReportModel, charts: list[Chart], stem: str) -> str:
         lines.append(
             f"| {r.label} | {r.model} | {r.threads} | {r.build} | {_fmt_kleidiai(r.kleidiai)} | "
             f"{r.gen_tput:.0f} | {mem} | {pcost} | {r.cost.format_usd_per_mtok()} | "
-            f"{_fmt_quality(r.quality_counts, r.quality_acc)} |"
+            f"{_fmt_quality_row(r)} |"
         )
     lines.append("")
 
@@ -676,10 +1049,21 @@ def build_markdown(model: ReportModel, charts: list[Chart], stem: str) -> str:
                 )
             lines.append("")
 
+    if model.kernel_evidence or model.system_info or model.cpu_features:
+        lines.append("## Kernel evidence (from real runs, not build flags)\n")
+        lines.append("_Which CPU weight buffer each config actually loaded, per the load log._\n")
+        for ev in model.kernel_evidence:
+            lines.append(f"- weight buffer - {ev}")
+        if model.system_info:
+            lines.append(f"- ggml system_info: `{model.system_info}`")
+        if model.cpu_features:
+            lines.append(f"- cpuinfo Features: `{model.cpu_features}`")
+        lines.append("")
+
     if model.duplicates_dropped:
         lines.append(
-            f"_Note: {len(model.duplicates_dropped)} older run(s) with duplicate labels were "
-            f"superseded by newer runs: {', '.join(model.duplicates_dropped)}._\n"
+            f"_Note: {len(model.duplicates_dropped)} run group(s) consolidated: "
+            f"{', '.join(model.duplicates_dropped)}._\n"
         )
 
     if model.hotspots:
@@ -749,7 +1133,7 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;border-top:1px solid va
 <section><h2>Runs</h2><table>
 <thead><tr><th>label</th><th>model:variant</th><th>threads</th><th>build</th><th>kleidiai</th><th>gen tok/s</th><th>peak mem</th><th>$/M prompt tok</th><th>$/M gen tok</th><th>quality</th></tr></thead>
 <tbody>{% for r in m.result_rows %}{% if m.grouped and r.show_group %}<tr><td colspan="10" style="text-align:left;font-weight:700;background:#f1f3f5">{{ r.experiment or "ad-hoc" }}</td></tr>{% endif %}<tr><td>{{ r.label }}</td><td>{{ r.model }}</td><td>{{ r.threads }}</td><td>{{ r.build }}</td><td>{{ r.kleidiai_human }}</td><td>{{ "%.0f"|format(r.gen_tput) }}</td><td>{{ r.peak_human }}</td><td>{{ r.prompt_cost_human }}</td><td>{{ r.cost.format_usd_per_mtok() }}</td><td>{{ r.quality_human }}</td></tr>{% endfor %}</tbody>
-</table>{% if not m.priced %}<div class="note">$/M tokens shows "set price" until you set the instance hourly price in configs/instances.yaml.</div>{% endif %}</section>
+</table>{% if not m.priced %}<div class="note">Costs are $0.00: this run executed on a free CI runner (github-arm-runner). Select a paid instance in configs/instances.yaml to price the same throughput on rented hardware.</div>{% endif %}</section>
 
 <section><h2>Prefill scaling</h2>
 <div class="note">TTFT is derived as prompt_tokens &divide; prefill throughput; excludes tokenization and model-load time. &plusmn; is the spread across repetitions.</div>
@@ -771,7 +1155,8 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;border-top:1px solid va
 <tbody>{% for p in run.points|sort(attribute="parallel") %}<tr><td>{{ p.parallel }}</td><td>{{ "%.1f"|format(p.speed_pp) }}</td><td>{{ "%.1f"|format(p.speed_tg) }}</td><td>{{ "%.1f"|format(p.speed) }}</td></tr>{% endfor %}</tbody>
 </table>{% endfor %}</section>{% endif %}
 
-{% if m.duplicates_dropped %}<div class="note">Note: {{ m.duplicates_dropped|length }} older run(s) with duplicate labels were superseded by newer runs.</div>{% endif %}
+{% if m.kernel_evidence or m.system_info %}<h2>Kernel evidence</h2><div class="note">{% for ev in m.kernel_evidence %}weight buffer &mdash; {{ ev }}<br>{% endfor %}{% if m.system_info %}<code>{{ m.system_info }}</code><br>{% endif %}{% if m.cpu_features %}<code>Features: {{ m.cpu_features }}</code>{% endif %}</div>{% endif %}
+{% if m.duplicates_dropped %}<div class="note">Note: {{ m.duplicates_dropped|length }} run group(s) consolidated ({{ m.duplicates_dropped|join(", ") }}).</div>{% endif %}
 
 {% if m.hotspots %}<section><h2>Top hotspots (Arm Performix)</h2>
 {% if m.profile_target %}<div class="note">profiled: <code>{{ m.profile_target }}</code></div>{% endif %}
@@ -796,7 +1181,7 @@ def build_html(model: ReportModel, charts: list[Chart]) -> str:
     last_exp = object()
     for r in model.result_rows:
         r.peak_human = bytes_human(r.peak_rss) if r.peak_rss else "-"  # type: ignore[attr-defined]
-        r.quality_human = _fmt_quality(r.quality_counts, r.quality_acc)  # type: ignore[attr-defined]
+        r.quality_human = _fmt_quality_row(r)  # type: ignore[attr-defined]
         r.kleidiai_human = _fmt_kleidiai(r.kleidiai)  # type: ignore[attr-defined]
         r.prompt_cost_human = (  # type: ignore[attr-defined]
             r.prompt_cost.format_usd_per_mtok() if r.prompt_cost else "-"
@@ -828,7 +1213,7 @@ def render_report(
     instance_name: str | None = None,
     demo: bool = False,
 ) -> ReportPaths | None:
-    """Render the report. Returns paths, or None when there are no results to render."""
+    """Render the report. Output paths, or None when there are no results."""
     instances = load_instances()
 
     if demo:
@@ -854,7 +1239,13 @@ def render_report(
         ttft_results=ttft_res,
         throughput_results=tp_res,
     )
-    charts = build_charts(results, instance)  # raises ReportError if deps missing
+    charts = build_charts(  # raises ReportError if deps missing
+        results,
+        instance,
+        ttft_results=ttft_res,
+        throughput_results=tp_res,
+        demo=model.demo,  # model.demo also covers committed synthetic results loaded off disk
+    )
 
     out_dir = out_dir or reports_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -878,10 +1269,10 @@ def render_report(
 
 
 def synthetic_results() -> tuple[list[SweepResult], InstanceSpec]:
-    """Plausible-but-fake Arm Graviton4 numbers for a clearly-labeled DEMO report.
+    """Plausible-but-fake Arm Graviton4 numbers for a DEMO-labelled report.
 
-    NOT measured data. Used by `firstflight report --demo` so the report layout can be seen
-    (and the demo video recorded) without an Arm box. Real reports come from `firstflight bench`.
+    NOT measured data. `firstflight report --demo` uses this so the layout can be seen (and the
+    demo video recorded) without an Arm box. Real reports come from `firstflight bench`.
     """
     from ..bench.result import EngineInfo, HostInfo, ModelInfo
 
@@ -939,14 +1330,14 @@ def synthetic_results() -> tuple[list[SweepResult], InstanceSpec]:
         arch="arm64",
         cpu="Arm Neoverse-V2 (Graviton4)",
         vcpus=8,
-        usd_per_hour=0.319,  # real c8g.2xlarge on-demand price (us-east-1, 2026-07-05); DATA is synthetic
+        usd_per_hour=0.319,  # real c8g.2xlarge on-demand (us-east-1, 2026-07-05); perf is synthetic
         notes="real instance price; synthetic perf data",
     )
     return [baseline, optimized], instance
 
 
 def synthetic_ttft():
-    """Plausible-but-fake measured-TTFT prompt-cache pair for the DEMO report (NOT measured)."""
+    """Fake measured-TTFT prompt-cache pair for the DEMO report. NOT measured."""
     from ..bench.ttft import Timings, TtftResult
 
     return TtftResult(
@@ -962,7 +1353,7 @@ def synthetic_ttft():
 
 
 def synthetic_throughput():
-    """Plausible-but-fake concurrency sweep for the DEMO report (NOT measured)."""
+    """Fake concurrency sweep for the DEMO report. NOT measured."""
     from ..bench.throughput import ThroughputPoint, ThroughputResult
 
     pts = [
@@ -983,7 +1374,7 @@ def synthetic_throughput():
 
 
 def synthetic_profile() -> ProfileResult:
-    """Plausible-but-fake Arm Performix hotspots for the DEMO report (NOT measured)."""
+    """Fake Arm Performix hotspots for the DEMO report. NOT measured."""
     hotspots = [
         Hotspot("kai_matmul_clamp_f32_qai8dxp_qsi4c32p", 41.7, "libggml-cpu.so"),
         Hotspot("ggml_compute_forward_mul_mat", 18.3, "libggml-cpu.so"),

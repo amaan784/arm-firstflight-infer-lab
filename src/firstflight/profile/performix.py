@@ -1,27 +1,27 @@
-"""Arm Performix wrapper (clean interface, graceful no-op off Arm).
+"""Arm Performix wrapper. No-ops off Arm.
 
 Arm Performix is Arm's performance-analysis toolkit for Neoverse server/cloud (AWS Graviton,
 Microsoft Cobalt, Google Axion). Its CLI tool is `apx`.
 
-Real workflow (sourced from Arm's open-source MCP server, github.com/arm/mcp —
-mcp-local/utils/apx.py + mcp-local/sql/queries.sql — since the official CLI Reference Guide
-doc 111566 is a JS-rendered SPA that a plain fetch can't read):
+Workflow taken from Arm's open-source MCP server, github.com/arm/mcp (mcp-local/utils/apx.py
+and mcp-local/sql/queries.sql). The official CLI Reference Guide, doc 111566, is a JS-rendered
+SPA that a plain fetch can't read.
 
   1. register a target (once):  apx target add <user>@<host>:22:<key>   (or --target=localhost)
   2. run a recipe:  apx recipe run code_hotspots --workload="<cmd>" --json --target=localhost
   3. render the run:  apx run render <run_id>                  # -> session_id
   4. query hotspots:  apx render query <session_id> "<top-10 self-time SQL>"
 
-The `code_hotspots` recipe's query returns the top-10 self-time functions with columns
-function_name, node_type, periodic_samples_self, periodic_samples_self_percent, rendered as a
-`┃`-delimited Unicode table (or JSON via --json).
+The `code_hotspots` query returns the top-10 self-time functions with columns function_name,
+node_type, periodic_samples_self, periodic_samples_self_percent, as a `┃`-delimited Unicode
+table (or JSON via --json).
 
-Off Arm / without `apx` / on a failure of the (high-confidence but unverified) invocation,
-`profile()` returns a `skipped` ProfileResult with a clear reason and never raises.
+Off Arm, without `apx`, or on any failure of the (high-confidence but unverified) invocation,
+`profile()` returns a `skipped` ProfileResult with a reason. It never raises.
 
 TODO(confirm) on the live box / against doc 111566: the exact JSON keys for run_id / session_id
 and whether `apx recipe run --json` already embeds the hotspot table (skipping render/query).
-The COMMANDS themselves come from Arm's own tooling, not invention.
+The commands themselves come from Arm's own tooling, not invention.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ RECIPES = ["code_hotspots", "instruction_mix", "cpu_microarchitecture", "memory_
 DEFAULT_RECIPE = "code_hotspots"
 
 # The documented top-10 self-time hotspot query (mcp-local/sql/queries.sql). The full query
-# builds `agg` from drilldown tables; this is the selecting tail the parser ultimately needs.
+# builds `agg` from drilldown tables; this is the selecting tail the parser needs.
 HOTSPOTS_SQL = (
     "SELECT a.function_name, a.node_type, a.periodic_samples_self, "
     "a.periodic_samples_self_percent FROM agg a ORDER BY a.periodic_samples_self DESC LIMIT 10;"
@@ -102,7 +102,7 @@ class ProfileResult:
 
 
 def find_apx() -> Path | None:
-    """Locate the `apx` CLI on PATH or at the documented install path."""
+    """`apx` on PATH, or at the documented install path. None if absent."""
     found = shutil.which(APX_BINARY)
     if found:
         return Path(found)
@@ -146,10 +146,10 @@ def build_query_cmd(apx: Path, session_id: str, sql: str = HOTSPOTS_SQL) -> list
 
 
 def parse_hotspots(text: str, top_n: int = TOP_N) -> list[Hotspot]:
-    """Parse apx output into ranked hotspots.
+    """Parse apx output into ranked hotspots, top-N by percent desc.
 
     Handles JSON (list/obj with function_name|function|symbol + percent|self_percent), the
-    `┃`-delimited Unicode table apx render emits, and plain CSV. Returns top-N by percent desc.
+    `┃`-delimited Unicode table apx render emits, and plain CSV.
     """
     text = (text or "").strip()
     if not text:
@@ -172,7 +172,7 @@ def _to_float(value) -> float:
 
 
 def _first(d: dict, keys, default=None):
-    """First present (non-None) value among keys — distinguishes a real 0 from missing."""
+    """First non-None value among keys. Non-None, not truthy, so a real 0 survives."""
     for k in keys:
         if d.get(k) is not None:
             return d[k]
@@ -253,7 +253,7 @@ def _rows_to_hotspots(rows: list[list[str]]) -> list[Hotspot]:
 
 
 def _extract_id(text: str, keys: tuple[str, ...]) -> str | None:
-    """Pull a run_id / session_id from apx output. TODO(confirm) exact JSON shape (doc 111566)."""
+    """Pull a run_id / session_id out of apx output. TODO(confirm) JSON shape (doc 111566)."""
     text = (text or "").strip()
     if text and text[0] in "[{":
         try:
@@ -273,13 +273,13 @@ def _extract_id(text: str, keys: tuple[str, ...]) -> str | None:
 
 
 class PerformixProfiler:
-    """Thin, testable wrapper around the `apx` CLI."""
+    """Thin wrapper around the `apx` CLI."""
 
     def __init__(self) -> None:
         self._apx = find_apx()
 
     def available(self) -> bool:
-        """True only when we are on Arm Linux AND `apx` is installed."""
+        """True only on Arm Linux with `apx` installed."""
         return is_arm_linux() and self._apx is not None
 
     def unavailable_reason(self) -> str:
@@ -302,10 +302,10 @@ class PerformixProfiler:
         target: str = "localhost",
         timeout: float = 1800.0,
     ) -> ProfileResult:
-        """Profile `command` with Performix and return the top hotspots.
+        """Profile `command` with Performix, return the top hotspots.
 
-        Never raises: off Arm / without `apx` / on an invocation failure it returns a `skipped`
-        ProfileResult so the report keeps working.
+        Never raises. Off Arm, without `apx`, or on an invocation failure it returns a
+        `skipped` ProfileResult so the report keeps working.
         """
         target_str = " ".join(command)
         stamp = datetime.now(UTC).isoformat()
@@ -366,7 +366,7 @@ class PerformixProfiler:
                 hotspots=hotspots,
                 raw_output=raw,
             )
-        except Exception as exc:  # noqa: BLE001 - any apx failure degrades to a clear skip
+        except Exception as exc:  # noqa: BLE001 - any apx failure degrades to a skip
             return self._skip(
                 f"apx invocation failed ({type(exc).__name__}: {exc}). Exact apx flow is "
                 f"TODO(confirm) — see {PERFORMIX_DOC} and {ARM_MCP}.",

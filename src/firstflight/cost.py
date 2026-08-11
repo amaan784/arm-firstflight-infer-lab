@@ -1,8 +1,8 @@
 """Throughput -> cost. Turns tokens/sec + $/hour into $ per million tokens.
 
-The only external input is the instance hourly price (configs/instances.yaml) — real
-published on-demand prices with verification dates; re-check for your region/instance on
-the day you benchmark, since prices float.
+Only external input is the instance hourly price (configs/instances.yaml): real published
+on-demand prices with verification dates. Prices float, so re-check your region/instance
+on the day you benchmark.
 """
 
 from __future__ import annotations
@@ -20,11 +20,13 @@ class CostResult:
     usd_per_hour: float
     usd_per_million_tokens: float
     tokens_per_usd: float
-    priced: bool  # False when usd_per_hour is unset (0.0) — cost is then meaningless
+    priced: bool  # False when usd_per_hour == 0.0 (a free tier / CI runner)
 
     def format_usd_per_mtok(self) -> str:
         if not self.priced:
-            return "n/a (set instance price)"
+            # 0.0 is a real price here: instances.yaml carries verified prices, and the
+            # github-arm-runner entry is deliberately $0 (free for public repos).
+            return "$0.00 (free runner)"
         if math.isinf(self.usd_per_million_tokens):
             return "inf"
         return f"${self.usd_per_million_tokens:.4f}"
@@ -33,11 +35,10 @@ class CostResult:
 def cost_per_million_tokens(throughput_tok_s: float, usd_per_hour: float) -> float:
     """USD to produce 1,000,000 tokens at a sustained throughput.
 
-    cost = (usd_per_hour / tokens_per_hour) * 1e6
-         = usd_per_hour / (throughput_tok_s * 3600) * 1e6
+    cost = usd_per_hour / (throughput_tok_s * 3600) * 1e6
 
-    Returns +inf when throughput is non-positive (can't make progress), and 0.0 when the
-    price is 0 (e.g. free-tier / CI).
+    +inf when throughput is non-positive (no progress), 0.0 when the price is 0 (free-tier
+    or CI).
     """
     if usd_per_hour <= 0:
         return 0.0

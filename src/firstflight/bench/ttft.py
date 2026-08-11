@@ -1,25 +1,25 @@
-"""MEASURED time-to-first-token via llama-server, and the prompt-cache demo.
+"""Measured time-to-first-token via llama-server, plus the prompt-cache demo.
 
-Everywhere else in the harness TTFT is *derived* (prompt_tokens ÷ prefill throughput). This
-module measures it: `llama-server`'s native `/completion` endpoint returns a `timings` object
-with `prompt_ms` (wall-clock prompt processing) and `prompt_n` (tokens actually processed) —
-the server's own stopwatch.
+Everywhere else in the harness TTFT is derived (prompt_tokens / prefill throughput). Here
+it's measured: llama-server's /completion returns a `timings` object with prompt_ms
+(wall-clock prompt processing) and prompt_n (tokens actually processed).
 
-It also demonstrates the single biggest honest TTFT lever for agentic/RAG serving:
-**prefix caching**. llama-server's `cache_prompt` (request field, default true) re-uses the
-KV cache when a request shares a prefix with the previous one — only the differing suffix is
-prefilled. `--cache-reuse N` (server flag, default 0) additionally re-uses non-exact-prefix
-chunks via KV shifting. So for two requests sharing a long system/context prefix:
+Also shows the biggest honest TTFT lever for agentic/RAG serving: prefix caching. The
+request field `cache_prompt` (default true) re-uses the KV cache when a request shares a
+prefix with the previous one, so only the differing suffix is prefilled. The server flag
+`--cache-reuse N` (default 0) also re-uses non-exact-prefix chunks via KV shifting. Two
+requests sharing a long system/context prefix:
 
-  turn 1 (cold): the full prefix is prefilled  -> large prompt_ms, prompt_n ≈ full prompt
-  turn 2 (warm): only the new question is prefilled -> prompt_ms collapses, prompt_n is tiny
+  turn 1 (cold): full prefix prefilled -> large prompt_ms, prompt_n ~= full prompt
+  turn 2 (warm): only the new question prefilled -> prompt_ms collapses, prompt_n tiny
 
-Flags/fields VERIFIED against llama.cpp master source (2026-07-31): `/health` returns 503
-while loading and 200 {"status":"ok"} when ready; `/completion` accepts `cache_prompt`
-(default true) + `n_predict`; the response `timings` object carries prompt_n / prompt_ms /
-predicted_n / predicted_ms (result_timings::to_json).
-Everything degrades gracefully: no llama-server binary -> clean skip; startup/HTTP failures
--> clear error, server always torn down.
+Flags/fields verified against llama.cpp master source (2026-07-31): /health returns 503 while
+loading and 200 {"status":"ok"} when ready; /completion accepts cache_prompt (default true)
+and n_predict; the response `timings` object carries prompt_n / prompt_ms / predicted_n /
+predicted_ms (result_timings::to_json).
+
+No llama-server binary is a clean skip. Startup/HTTP failures raise, and the server is always
+torn down.
 """
 
 from __future__ import annotations
@@ -32,21 +32,21 @@ from pathlib import Path
 
 import requests
 
-# A deterministic filler paragraph (~52 words) used to build long shared prefixes. Content is
-# irrelevant to the measurement; variety avoids degenerate tokenization.
+# Filler paragraph (~52 words) for building long shared prefixes. The content doesn't matter,
+# but some variety keeps tokenization from going degenerate.
 _PARA = (
     "Section {i}: The cluster report for region {i} lists CPU utilisation, memory bandwidth, "
     "cache behaviour, and storage throughput for every node. Operators review these figures "
     "each morning, compare them with the previous week, and record any regression that "
     "exceeds the agreed threshold before approving the deployment window for that day. "
 )
-_CHARS_PER_TOKEN = 4.0  # sizing heuristic only; the SERVER reports exact prompt_n
+_CHARS_PER_TOKEN = 4.0  # sizing heuristic only; the server reports exact prompt_n
 
 
 def build_prefix(target_tokens: int) -> str:
-    """A deterministic long document sized to roughly `target_tokens` LLM tokens.
+    """Deterministic document sized to roughly `target_tokens` tokens.
 
-    Only used to size the experiment — the reported numbers use the server's exact counts.
+    Sizing only. Reported numbers come from the server's own counts.
     """
     target_chars = int(target_tokens * _CHARS_PER_TOKEN)
     parts: list[str] = []
@@ -62,8 +62,8 @@ def build_prefix(target_tokens: int) -> str:
 
 @dataclass
 class Timings:
-    prompt_n: int  # tokens actually processed during prefill (shows cache reuse!)
-    prompt_ms: float  # measured wall-clock prompt processing = measured TTFT component
+    prompt_n: int  # tokens actually prefilled; this is where cache reuse shows up
+    prompt_ms: float  # wall-clock prompt processing, the measured TTFT component
     predicted_n: int
     predicted_ms: float
 
@@ -73,11 +73,11 @@ class Timings:
 
 
 class TtftError(RuntimeError):
-    """llama-server measurement failed (startup, HTTP, or response shape)."""
+    """llama-server measurement failed: startup, HTTP, or response shape."""
 
 
 def parse_timings(resp: dict) -> Timings:
-    """Extract the server's measured timings from a /completion response."""
+    """Timings out of a /completion response."""
     t = resp.get("timings")
     if not isinstance(t, dict) or "prompt_ms" not in t:
         raise TtftError(
@@ -94,7 +94,7 @@ def parse_timings(resp: dict) -> Timings:
 
 @dataclass
 class TtftResult:
-    """Measured cold-vs-warm TTFT for a shared prefix. Saved to bench/results/ttft_*.json."""
+    """Cold-vs-warm TTFT for a shared prefix. Saved to bench/results/ttft_*.json."""
 
     timestamp: str
     model: str
@@ -145,11 +145,11 @@ class TtftResult:
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-# --- server lifecycle ---------------------------------------------------------
+# --- server lifecycle ---
 
 
 def free_port(host: str = "127.0.0.1") -> int:
-    """An ephemeral free TCP port — avoids racing a stale/foreign server on a fixed port."""
+    """Ephemeral free TCP port. A fixed port can collide with a stale or foreign server."""
     import socket
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -180,13 +180,13 @@ def build_server_cmd(
         str(cache_reuse),
     ]
     if ctx:
-        # must hold the full prefix + generation; llama-server's default (4096) silently
-        # truncates longer prefixes, which would break the shared-prefix premise
+        # has to hold prefix + generation. the default 4096 silently truncates longer
+        # prefixes, which kills the shared-prefix premise
         cmd += ["-c", str(ctx)]
     if threads:
         cmd += ["-t", str(threads)]
     if mlock:
-        # keep weights resident (no post-idle page-fault TTFT stalls); needs RLIMIT_MEMLOCK
+        # keeps weights resident, no page-fault TTFT stall after idle. needs RLIMIT_MEMLOCK
         cmd += ["--mlock"]
     return cmd
 
@@ -194,7 +194,7 @@ def build_server_cmd(
 def wait_ready(
     base_url: str, *, timeout: float = 180.0, proc: subprocess.Popen | None = None
 ) -> None:
-    """Poll GET /health until the server reports ready (200)."""
+    """Poll GET /health until it returns 200."""
     deadline = time.monotonic() + timeout
     last = "no response yet"
     while time.monotonic() < deadline:
@@ -219,7 +219,7 @@ def completion(
     cache_prompt: bool = True,
     timeout: float = 600.0,
 ) -> Timings:
-    """POST /completion and return the server's measured timings."""
+    """POST /completion, return the server's timings."""
     r = requests.post(
         f"{base_url}/completion",
         json={
@@ -237,10 +237,10 @@ def completion(
 def measure_prompt_cache(
     base_url: str, prefix: str, *, n_predict: int = 16
 ) -> tuple[Timings, Timings]:
-    """The cold/warm pair: same long prefix, two different questions.
+    """The cold/warm pair: same long prefix, two different questions. Returns (cold, warm).
 
-    Returns (cold, warm). With cache_prompt (default true) the warm turn re-uses the prefix's
-    KV cache, so warm.prompt_n collapses to roughly the question length.
+    With cache_prompt (default true) the warm turn re-uses the prefix's KV cache, so
+    warm.prompt_n collapses to about the question length.
     """
     q1 = "\n\nQuestion: Summarise the purpose of these reports in one sentence.\nAnswer:"
     q2 = "\n\nQuestion: What do operators compare the figures with?\nAnswer:"

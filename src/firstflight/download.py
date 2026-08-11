@@ -1,8 +1,8 @@
 """Download GGUF model files on demand.
 
 Streams the Hugging Face `resolve` URL with `requests` (a core dep) so the smoke path
-needs no extra packages. An optional faster/authenticated path via `huggingface_hub`
-can be added behind the `[hub]` extra later.
+needs no extra packages. A faster/authenticated `huggingface_hub` path can go behind the
+`[hub]` extra later.
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ def ensure_model(
     *,
     force: bool = False,
 ) -> Path:
-    """Return a local path to the GGUF, downloading it if missing.
+    """Local path to the GGUF, downloading it if missing.
 
-    Verifies sha256 when one is configured. Downloads atomically (`.part` then rename) so
-    an interrupted run never leaves a corrupt file in the cache.
+    Verifies sha256 when one is configured. Writes to `.part` then renames, so an
+    interrupted run never leaves a corrupt file in the cache.
     """
     dest_dir = dest_dir or model_dir()
     dest_dir.mkdir(parents=True, exist_ok=True)

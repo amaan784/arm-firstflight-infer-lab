@@ -1,19 +1,18 @@
-"""Quality-delta guardrail — prove a speedup didn't tank accuracy.
+"""Quality-delta guardrail: prove a speedup didn't tank accuracy.
 
 Two paths:
 
-1. **Built-in probe (default).** A small fixed Q&A set run through `llama-cli` with exact-match
-   scoring. Self-contained: no torch, no server, no extra deps beyond llama.cpp. This is the
-   right tool for "does the quantized/optimized model still answer sanely?" and works on the
-   Arm box exactly like the benchmark.
+1. **Built-in probe (default).** A fixed Q&A set run through `llama-cli` with exact-match
+   scoring. No torch, no server, nothing beyond llama.cpp. Answers "does the
+   quantized/optimized model still answer sanely?" and runs on the Arm box like the benchmark.
 
 2. **lm-evaluation-harness (optional, `[eval]` extra).** For a real MMLU/GSM8K subset, run a
    `llama-server` and point lm-eval at its OpenAI-compatible endpoint with
-   `--model local-completions` (the `gguf` backend is known-broken). This uses the LIGHT
-   `lm-eval[api]` install (no torch). `build_lm_eval_cmd` constructs that invocation; the exact
-   task names/endpoint are TODO(confirm) on the box.
+   `--model local-completions` (the `gguf` backend is known-broken). Uses the light
+   `lm-eval[api]` install (no torch). `build_lm_eval_cmd` builds that invocation; exact task
+   names/endpoint are TODO(confirm) on the box.
 
-The guardrail is intentionally small — it is a regression check, not a leaderboard.
+Small on purpose: a regression check, not a leaderboard.
 """
 
 from __future__ import annotations
@@ -28,15 +27,13 @@ from ..engines import llama_cpp
 @dataclass(frozen=True)
 class QualityItem:
     prompt: str
-    answers: list[str]  # acceptable gold strings; normalized-substring match
+    answers: list[str]  # acceptable gold strings; whole-token match
 
 
-# A deterministic 40-item probe (arithmetic + factual + extraction) with robust short
-# answers, scored by whole-token match and run at --temp 0 (greedy) so it measures the model,
-# not the sampler. 40 items = 2.5-percentage-point granularity, finer than the report's
-# "held" tolerance. Deliberately raw-completion style (no chat template): single-shot
-# `llama-cli -no-cnv` avoids interactive mode entirely, and base-completion prompts keep the
-# probe identical across base and instruct checkpoints.
+# 40 items (arithmetic + factual + extraction), short answers, whole-token match, --temp 0.
+# 40 gives 2.5-point granularity, finer than the report's "held" tolerance. Raw-completion
+# style, no chat template: single-shot `llama-cli -no-cnv` skips interactive mode, and
+# base-completion prompts keep the probe identical across base and instruct models.
 PROBE: list[QualityItem] = [
     # arithmetic (15)
     QualityItem("Question: What is 2 + 2?\nAnswer:", ["4", "four"]),
@@ -140,8 +137,7 @@ def _normalize(s: str) -> str:
 def matches(output: str, answers: list[str]) -> bool:
     """True if any gold answer appears as a whole token (word-boundary match).
 
-    Avoids substring false-positives that would inflate the guardrail: '7' matches '... = 7.'
-    but NOT '17'.
+    Plain substring matching would inflate the score: '7' matches '... = 7.' but not '17'.
     """
     o = _normalize(output)
     for a in answers:
@@ -160,7 +156,7 @@ def run_probe(
     items: list[QualityItem] | None = None,
     seed: int = 42,
 ) -> QualityResult:
-    """Run the built-in exact-match probe through llama-cli and score accuracy."""
+    """Run the built-in exact-match probe through llama-cli, score accuracy."""
     items = items or PROBE
     details: list[QualityItemResult] = []
     correct = 0
@@ -172,9 +168,12 @@ def run_probe(
             n_predict=n_predict,
             threads=threads,
             seed=seed,
-            temp=0.0,  # greedy: measure the model, not the sampler
+            temp=0.0,  # greedy, so this measures the model not the sampler
         )
-        got = res.stdout.strip()
+        # Score the first line only. Matching anywhere in a free-running completion gives a
+        # rambling model more chances to hit the gold string, so a worse model could score
+        # higher. One line is the answer; the rest is drift.
+        got = res.stdout.strip().split("\n", 1)[0].strip()
         ok = res.ok and matches(got, it.answers)
         correct += int(ok)
         details.append(QualityItemResult(it.prompt, it.answers, got[:120], ok))
@@ -208,7 +207,7 @@ def build_lm_eval_cmd(
     limit: int = 10,
     chat: bool = True,
 ) -> list[str]:
-    """Build the light, no-torch lm-eval invocation against a running `llama-server`.
+    """The light, no-torch lm-eval invocation against a running `llama-server`.
 
     Prereqs (TODO(confirm) exact task names/endpoint on the box):
       pip install 'lm-eval[api]'                       # no torch

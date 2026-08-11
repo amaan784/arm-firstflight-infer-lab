@@ -1,11 +1,10 @@
-"""Arm FirstFlight — Inference Optimization Lab.
+"""Arm FirstFlight: inference optimization lab.
 
-Reproducible benchmark + optimization harness for CPU LLM inference on Arm
-Neoverse cloud servers, focused on prefill / time-to-first-token (TTFT).
+Benchmark + optimization harness for CPU LLM inference on Arm Neoverse cloud
+servers, focused on prefill / time-to-first-token (TTFT).
 
-The package degrades gracefully off Arm: Arm-only tools (Arm Performix, KleidiAI
-kernels) are wrapped behind clean interfaces that no-op with a clear message when
-absent, so the smoke test runs on any machine.
+Off Arm, the Arm-only tools (Performix, KleidiAI kernels) sit behind interfaces
+that no-op with a message, so the smoke test still runs.
 """
 
 __version__ = "0.1.0"

@@ -91,3 +91,34 @@ def test_sweep_timeout_is_bencherror_not_crash(monkeypatch):
             threads=None,
             repetitions=1,
         )
+
+
+def test_sweep_does_not_default_to_prio(monkeypatch):
+    """run_sweep must not pass --prio by default.
+
+    Raising scheduler priority needs privileges a container usually lacks, and llama-bench
+    treats the refusal as fatal ("failed to set process priority ... Inappropriate ioctl
+    for device"), so every config dies before measuring anything.
+    """
+    seen = {}
+
+    def capture(cmd, timeout):
+        seen["cmd"] = cmd
+        raise prefill.BenchError("stop here; we only want the command")
+
+    monkeypatch.setattr(prefill, "run_with_peak_rss", capture)
+    with pytest.raises(prefill.BenchError):
+        prefill.run_sweep(
+            bench_bin=Path("b"),
+            model_path=Path("m"),
+            model_id="x",
+            variant="q4_0",
+            workload_name="w",
+            prompt_lengths=[128],
+            n_gen=32,
+            threads=None,
+            repetitions=1,
+        )
+    assert "--prio" not in seen["cmd"]
+    # the other steadiness flags stay on: they need no privileges
+    assert "-mmp" in seen["cmd"] and "--delay" in seen["cmd"]

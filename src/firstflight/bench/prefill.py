@@ -118,7 +118,8 @@ def build_llama_bench_command(
     if flash_attn:
         cmd += ["-fa", flash_attn]
     # Measurement-steadiness flags (all verified on the real b9873 binary, 2026-08-09):
-    # --prio 2 resists co-tenant scheduling noise, -mmp 0 makes peak RSS honest malloc
+    # --prio raises scheduler priority (needs privileges; opt-in, see run_sweep), -mmp 0
+    # makes peak RSS honest malloc
     # (no lazily-paged mapped file) at some load-time cost, --delay settles between tests.
     if prio is not None:
         cmd += ["--prio", str(prio)]
@@ -260,7 +261,11 @@ def run_sweep(
     ubatch_size: int | None = None,
     flash_attn: str = "",
     timeout: float = 7200.0,
-    prio: int | None = 2,
+    # --prio is NOT defaulted on: raising scheduler priority needs privileges the process
+    # usually lacks in a container, and llama-bench treats the refusal as fatal
+    # ("failed to set process priority ... Inappropriate ioctl for device"). Pass prio=2
+    # explicitly on a dedicated box where it is permitted.
+    prio: int | None = None,
     mmap: bool | None = False,
     delay: int | None = 2,
 ) -> SweepResult:

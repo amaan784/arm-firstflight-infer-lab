@@ -161,7 +161,6 @@ def bench(
             threads,
             reps,
             "json",
-            prio=2,
             mmap=False,
             delay=2,  # mirror run_sweep's steadiness flags so dry-run shows the real command
         )

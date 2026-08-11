@@ -42,8 +42,10 @@ top-level JSON array of per-test rows (schema confirmed against
   absent (that high-water mark spans all children, so it is labeled as such). Benchmark sweeps
   run with `-mmp 0` (mmap off; flag verified on the real b9873 binary 2026-08-09), so peak RSS
   reflects allocated memory rather than lazily-paged file mappings, at some model-load-time
-  cost outside the timed regions. Sweeps also set `--prio 2` and `--delay 2` (steadier numbers
-  on shared runners). Treat peak RSS as capacity context, not a tuned metric.
+  cost outside the timed regions. Sweeps also set `--delay 2`, which settles the machine
+  between tests. `--prio` is available but off by default: raising scheduler priority needs
+  privileges a container does not grant, and llama-bench treats the refusal as fatal, so it is
+  opt-in for dedicated hardware. Treat peak RSS as capacity context, not a tuned metric.
 
 llama-bench sweeps over prompt sizes and threads are also Arm's own prescribed cloud
 benchmarking method: Arm's Graviton4/Axion Learning Paths run e.g.

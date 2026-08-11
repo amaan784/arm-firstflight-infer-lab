@@ -152,8 +152,9 @@ as *no win* rather than as a number.
 ([`docs/arm-bench-template.yml`](docs/arm-bench-template.yml)) that runs the three-build ladder
 in any repo; the **Performix `apx` wrapper** (sourced from Arm's MCP server); the
 **KleidiAI quant-support constraint** (Q4_0/Q8_0 only) written down with sources; the
-measurement methodology; and the stage-by-stage
-[`versions/`](versions/) build for anyone learning to assemble a rig like this.
+measurement methodology; and the **commit history itself** — the repo was committed stage by
+stage (foundation → benchmark → report → profiling → experiments → autotuner → integration →
+hardening), so stepping through the commits replays how a rig like this gets assembled.
 
 **Why it should win.**
 - **Technological Implementation:** a real, non-trivial Arm optimization axis (KleidiAI Q4_0
@@ -261,7 +262,6 @@ bench/          results/ (JSON) · reports/ (generated)
 docker/         Dockerfile.arm64 (reproducible aarch64 env)
 scripts/        setup_arm_vm.sh · run_remote.sh
 docs/           EXPLAINER.md (concepts) · METHODOLOGY.md · RUNBOOK.md · ADOPT.md (+ CI template) · DEMO_SCRIPT.md · DEVPOST.md (submission draft) · CONFIRM_ON_ARM.md
-versions/       v1..v7 — the build sliced into cumulative, independently runnable stages
 .github/workflows/ ci.yml (lint+test) · arm-bench.yml (free Arm benchmarks)
 ```
 (`engine/` and `models/` are created at runtime by `setup-engine`/`download` and stay untracked.)

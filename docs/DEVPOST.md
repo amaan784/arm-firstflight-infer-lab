@@ -144,7 +144,7 @@ threads, and THP mode so any number can be traced to its exact configuration.
 `matplotlib` · `aws-graviton`
 
 ## Links
-- Repo: ⟨public GitHub URL⟩ (MIT)
+- Repo: https://github.com/amaan784/arm-firstflight-infer-lab (MIT)
 - One-click Arm run — serves as the rules' required "functioning demo / test build" access:
   ⟨link to a green arm-bench workflow run⟩
 - Video: ⟨link⟩ (script: `docs/DEMO_SCRIPT.md`)

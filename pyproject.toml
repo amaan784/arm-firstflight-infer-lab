@@ -56,8 +56,8 @@ all = [
 firstflight = "firstflight.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/USER/arm-firstflight-infer-lab"   # TODO(confirm): set once the repo exists
-Issues = "https://github.com/USER/arm-firstflight-infer-lab/issues"
+Homepage = "https://github.com/amaan784/arm-firstflight-infer-lab"
+Issues = "https://github.com/amaan784/arm-firstflight-infer-lab/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/firstflight"]

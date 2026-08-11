@@ -11,10 +11,8 @@
 > — and refuses to report a win it can't defend.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-<!-- After pushing, replace OWNER/REPO and uncomment:
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
-[![arm-bench](https://github.com/OWNER/REPO/actions/workflows/arm-bench.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/arm-bench.yml)
--->
+[![CI](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/ci.yml)
+[![arm-bench](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/arm-bench.yml/badge.svg)](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/arm-bench.yml)
 
 Built for the **Arm Create: AI Optimization Challenge (Cloud AI track)**.
 

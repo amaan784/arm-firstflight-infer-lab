@@ -38,7 +38,8 @@ a different tag/date:
 3. **Prices for YOUR region/date** — `configs/instances.yaml` holds verified us-east-1 values
    (2026-07-05); re-check for the exact instance/region you benchmark on before submission.
 
-4. **Repo URL** — `pyproject.toml` `[project.urls]` placeholder `USER/...`.
+4. ~~Repo URL~~ — done: `pyproject.toml` `[project.urls]` points at
+   `amaan784/arm-firstflight-infer-lab`.
 
 5. **Replace the synthetic sample** — run the `arm-bench` workflow (the
    `kleidiai-before-after` job) once and commit its real report over the demo sample.

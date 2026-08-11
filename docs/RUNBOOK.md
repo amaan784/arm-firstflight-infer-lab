@@ -84,7 +84,7 @@ Each `vN/README.md` says exactly what that stage adds.
    ```
    (or create it on github.com and `git remote add origin ... ; git push -u origin main`)
 
-2. **Set the repo URL** in `pyproject.toml` (`[project.urls]`, replace `USER/...`), commit.
+2. **Repo URL** in `pyproject.toml` `[project.urls]` — already set (`amaan784/arm-firstflight-infer-lab`).
 
 3. **CI runs automatically on push:** `CI` (lint + tests + demo report, every push) and the
    `arm-bench` **smoke-arm** job (real inference + baseline sweep on an Arm runner; report

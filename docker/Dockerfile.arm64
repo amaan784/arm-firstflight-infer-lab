@@ -3,7 +3,7 @@
 #   docker build -f docker/Dockerfile.arm64 -t firstflight:arm64 .
 #   docker run --rm firstflight:arm64 info      # ENTRYPOINT is `firstflight`
 #
-# LLAMA_TAG b9873 verified live 2026-07-05; tags float — bump deliberately.
+# LLAMA_TAG b9873 verified live 2026-07-05. Tags float, so bump this on purpose.
 
 FROM ubuntu:24.04
 
@@ -28,9 +28,9 @@ ENV LLAMA_CPP_BIN=/opt/llama.cpp/build
 
 # TODO(confirm): install Arm Performix (apx) here for in-container profiling.
 #   Install guide: https://learn.arm.com/install-guides/performix/
-#   The `apx` CLI runs recipes (e.g. `apx recipe run code_hotspots --workload=... --json
+#   `apx` runs recipes (`apx recipe run code_hotspots --workload=... --json
 #   --target=localhost`); see github.com/arm/mcp for the real command flow. Profiling usually
-#   targets a host over SSH and needs PMU access, so it is left out of the image by default.
+#   targets a host over SSH and needs PMU access, so it stays out of the image by default.
 
 # --- install firstflight ---
 WORKDIR /app
@@ -39,7 +39,7 @@ COPY src ./src
 COPY configs ./configs
 RUN pip install --break-system-packages --no-cache-dir -e ".[report,hub]"
 
-# Cache models on a volume to avoid re-downloading between runs.
+# cache models on a volume so runs don't re-download
 ENV FIRSTFLIGHT_MODEL_DIR=/models
 VOLUME ["/models"]
 

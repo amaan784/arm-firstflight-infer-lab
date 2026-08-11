@@ -1,4 +1,4 @@
-"""Full render tests — require the [report] extra (matplotlib + jinja2)."""
+"""Full render tests. Need the [report] extra (matplotlib + jinja2)."""
 
 import pytest
 
@@ -32,9 +32,9 @@ def test_render_no_results_returns_none(tmp_path):
 
 
 def test_cost_chart_uses_prompt_cost_and_skips_nonfinite():
-    # The cost chart is PROMPT-token cost (prefill throughput). A prefill-only result gets a
-    # finite prompt cost -> chart included; a result with NO prefill points must be skipped
-    # (its cost would be +inf), never plotted as an infinite bar.
+    # cost chart is PROMPT-token cost (prefill throughput). pp-only result -> finite cost, so
+    # the chart is included. A result with NO prefill points costs +inf and must be skipped,
+    # never plotted as an infinite bar.
     from firstflight.bench.result import BenchPoint, EngineInfo, HostInfo, ModelInfo, SweepResult
     from firstflight.config import InstanceSpec
 

@@ -1,4 +1,4 @@
-"""Report data-logic tests — no matplotlib/jinja2 needed (chart/HTML tests live elsewhere)."""
+"""Report data-logic tests. No matplotlib/jinja2; chart/HTML tests live elsewhere."""
 
 from firstflight.config import InstanceSpec
 from firstflight.report import render
@@ -13,7 +13,7 @@ def test_synthetic_and_model():
     assert model.priced is True
     assert all(r.cost.priced for r in model.result_rows)
     assert 32768 in model.contexts
-    assert model.metric_cards  # at-a-glance cards populated
+    assert model.metric_cards
 
 
 def test_markdown_contains_headline_and_cost():
@@ -25,16 +25,18 @@ def test_markdown_contains_headline_and_cost():
     assert "$/M gen tok" in md
     assert "32,768" in md  # context appears in the prefill table
     assert "DEMO" in md
-    assert "derived" in md  # TTFT approximation caveat is stated in the report itself
+    assert "derived" in md  # TTFT approximation caveat stated in the report itself
 
 
-def test_unpriced_instance_shows_set_price():
+def test_zero_price_instance_renders_free_runner():
     results, _ = render.synthetic_results()
     inst = InstanceSpec(name="x", arch="arm64", cpu="cpu", vcpus=8, usd_per_hour=0.0)
     model = render.build_report_model(results, inst, demo=False)
     assert model.priced is False
     md = render.build_markdown(model, [], "s")
-    assert "set price" in md or "n/a" in md
+    # $0 is a real price (free CI runner), not a missing configuration
+    assert "free runner" in md
+    assert "set price" not in md
 
 
 def test_single_result_headline():
@@ -53,8 +55,8 @@ def test_report_quality_column_and_headline():
 
 
 def test_prompt_cost_matches_prefill_story():
-    # The headline is prefill/TTFT, so the primary cost card must be PROMPT-token cost
-    # (computed from prefill throughput), not generation cost.
+    # headline is prefill/TTFT, so the primary cost card must be PROMPT-token cost
+    # (from prefill throughput), not generation cost.
     results, instance = render.synthetic_results()
     model = render.build_report_model(results, instance, demo=True)
     assert any("$/M prompt tok" in label for _, label in model.metric_cards)
@@ -69,7 +71,7 @@ def test_stddev_rendered_in_prefill_table():
     results, instance = render.synthetic_results()
     model = render.build_report_model(results, instance, demo=True)
     cell = model.prefill_table[0]["cells"]["baseline"]["tput"]
-    assert "±" in cell  # spread across repetitions is shown, not hidden
+    assert "±" in cell  # spread across repetitions is shown
 
 
 def test_report_includes_hotspots():
@@ -92,7 +94,7 @@ def test_skipped_profile_is_ignored():
 
 
 def test_committed_example_profiles_excluded(tmp_path):
-    # Regression: profile_example.json (synthetic hotspots) must not load into real reports.
+    # regression: profile_example.json (synthetic hotspots) must not load into real reports
     from firstflight.profile.performix import ProfileResult
 
     ProfileResult(skipped=False, timestamp="t", target="x").save_json(
@@ -106,7 +108,7 @@ def test_committed_example_profiles_excluded(tmp_path):
 
 
 def test_measured_ttft_and_throughput_render_in_report():
-    # The newest evidence must appear in the WOW artifact, not just console output.
+    # newest evidence has to land in the report, not just console output
     results, instance = render.synthetic_results()
     model = render.build_report_model(
         results,
@@ -132,11 +134,14 @@ def test_ttft_throughput_loaders(tmp_path):
     assert render.load_ttft_results(tmp_path)[0].cold.prompt_n == 2071
 
 
-def test_duplicate_labels_deduped_keep_newest():
+def test_duplicate_adhoc_labels_deduped_keep_newest():
+    # Ad-hoc reruns (experiment "") are not rounds: a stale rerun may not even be the same
+    # setup, so the NEWEST wins and the older one is listed as superseded.
     results, instance = render.synthetic_results()
     old = results[0]  # label "baseline", timestamp 2026-06-26
     import copy
 
+    old.experiment = ""
     newer = copy.deepcopy(old)
     newer.timestamp = "2026-07-01T00:00:00+00:00"
     newer.points[0].throughput_tok_s = 9999.0
@@ -145,6 +150,27 @@ def test_duplicate_labels_deduped_keep_newest():
     assert len(model.duplicates_dropped) == 1
     base_cell = model.prefill_table[0]["cells"]["baseline"]["tput"]
     assert base_cell.startswith("9999")  # the NEWEST run won
+
+
+def test_experiment_rounds_aggregate_to_median():
+    # Same experiment + same label = interleaved rounds (`experiment --rounds N`):
+    # the report shows the median per point with the between-round spread.
+    results, instance = render.synthetic_results()
+    import copy
+
+    r1 = results[0]  # experiment "kleidiai", label "baseline"
+    base_tput = r1.points[0].throughput_tok_s
+    r2 = copy.deepcopy(r1)
+    r2.timestamp = "2026-07-01T00:00:00+00:00"
+    r2.points[0].throughput_tok_s = base_tput + 100.0
+    r3 = copy.deepcopy(r1)
+    r3.timestamp = "2026-07-02T00:00:00+00:00"
+    r3.points[0].throughput_tok_s = base_tput + 50.0
+    model = render.build_report_model([r1, r2, r3, results[1]], instance, demo=True)
+    assert model.labels.count("baseline") == 1
+    assert any("median of 3 rounds" in d for d in model.duplicates_dropped)
+    cell = model.prefill_table[0]["cells"]["baseline"]["tput"]
+    assert cell.startswith(f"{base_tput + 50.0:.0f}")  # median of (x, x+100, x+50)
 
 
 def test_load_results_roundtrip(tmp_path):
@@ -156,11 +182,34 @@ def test_load_results_roundtrip(tmp_path):
 
 
 def test_committed_examples_never_contaminate_real_reports(tmp_path):
-    # Regression: the repo ships synthetic example_*.json; a real run's report must not load
-    # them (they'd force the DEMO banner and become the headline baseline).
+    # regression: the repo ships synthetic example_*.json. A real run must not load them,
+    # they'd force the DEMO banner and become the headline baseline.
     results, _ = render.synthetic_results()
     results[0].save_json(tmp_path / "example_baseline_q4_k_m.json")
     results[1].save_json(tmp_path / "real_run.json")
     loaded = render.load_results(tmp_path)
     assert len(loaded) == 1
     assert loaded[0].label == results[1].label
+
+
+def test_noise_floor_and_dominance_gate():
+    """A delta inside the measured same-build spread must not be claimed as a win."""
+    from firstflight.report.render import dominates_noise, noise_floor_pct
+
+    results, _ = render.synthetic_results()
+    # no noise-floor experiment present -> unknown floor -> never gate
+    assert noise_floor_pct(results) is None
+    assert dominates_noise(1.01, None) is True
+
+    # a 5% floor swallows a 3% delta but not a 50% one
+    assert dominates_noise(1.03, 5.0) is False
+    assert dominates_noise(1.50, 5.0) is True
+
+
+def test_headline_refuses_win_inside_noise():
+    results, instance = render.synthetic_results()
+    # the synthetic pair is ~1.54x; a 200% floor must suppress the claim
+    _main, _subs, cards = render._headline(
+        results[0], results[1:], [], instance, priced=False, floor_pct=200.0
+    )
+    assert cards[0][0] == "within noise"

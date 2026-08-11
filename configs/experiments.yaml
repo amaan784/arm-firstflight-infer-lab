@@ -1,12 +1,12 @@
-# Optimization experiments — the before/after axis, holding model + instance fixed.
+# Optimization experiments: the before/after axis, model + instance held fixed.
 # Each experiment is a set of labelled configs that `firstflight experiment` benchmarks (and
 # quality-evals) so the report can show the speed delta AND that accuracy held.
 #
-# Axes you can vary per config: `variant` (quant), `threads`, `cpu_mask` (hex, for pinning),
-# `cpu_strict`, `flash_attn` (on/off), `cache_type_k`/`cache_type_v` (quantized KV-cache),
-# `ubatch_size` (prefill micro-batch), `gen`, a per-config `model` override, and `bin`
-# (a llama.cpp binary/dir override — e.g. a KleidiAI build). `bin` supports ${ENV_VAR}
-# expansion so you can point at two builds without editing this file.
+# Axes per config: `variant` (quant), `threads`, `cpu_mask` (hex, for pinning), `cpu_strict`,
+# `flash_attn` (on/off), `cache_type_k`/`cache_type_v` (quantized KV-cache), `ubatch_size`
+# (prefill micro-batch), `gen`, a per-config `model` override, and `bin` (a llama.cpp
+# binary/dir override, e.g. a KleidiAI build). `bin` takes ${ENV_VAR} expansion so two builds
+# can be compared without editing this file.
 
 default_experiment: quant-sweep
 
@@ -16,18 +16,23 @@ experiments:
     model: qwen2.5-0.5b-instruct             # official repo has all three (q4_0 verified 2026-07-07)
     workload: rag-context
     configs:
-      - { label: q8_0, variant: q8_0 }
-      - { label: q4_k_m, variant: q4_k_m }
-      - { label: q4_0, variant: q4_0 }       # KleidiAI accelerates Q4_0 (not Q4_K_M)
+      # flash_attn pinned on all three: -fa defaults to auto and can resolve differently
+      # per quant, which would confound the comparison.
+      - { label: q8_0, variant: q8_0, flash_attn: "on" }
+      - { label: q4_k_m, variant: q4_k_m, flash_attn: "on" }
+      - { label: q4_0, variant: q4_0, flash_attn: "on" }   # KleidiAI accelerates Q4_0 (not Q4_K_M)
 
   thread-sweep:
     description: "Thread-count scaling at fixed quant."
     model: qwen2.5-0.5b-instruct
     workload: rag-context
     configs:
+      # Neoverse server cores have no SMT, so threads > cores only measures scheduler
+      # thrash. t3 vs t4 answers the real question on a 4-vCPU box: does leaving a core
+      # for the OS/agent daemon reduce variance more than it costs throughput?
       - { label: t2, variant: q4_k_m, threads: 2 }
+      - { label: t3, variant: q4_k_m, threads: 3 }
       - { label: t4, variant: q4_k_m, threads: 4 }
-      - { label: t8, variant: q4_k_m, threads: 8 }
 
   pinning:
     description: "CPU pinning on/off (llama-bench -C/--cpu-mask + --cpu-strict)."
@@ -42,12 +47,11 @@ experiments:
     model: qwen2.5-0.5b-instruct
     workload: rag-context
     configs:
-      # Quantizing the KV cache halves its footprint and eases memory-bandwidth pressure —
-      # increasingly the bottleneck at long context on Neoverse. Flags verified against the
-      # real b9873 llama-bench (2026-07-07). Watch the quality column for any cost.
-      # flash_attn is pinned ON for BOTH configs: quantized KV-cache without flash attention
-      # is dequantized every step and can be slower than f16 — FA must be a controlled
-      # variable here, not a confound.
+      # Quantizing the KV cache halves its footprint and eases memory-bandwidth pressure,
+      # which is the long-context bottleneck on Neoverse. Flags verified against the real
+      # b9873 llama-bench (2026-07-07). Watch the quality column for any cost.
+      # flash_attn pinned ON for BOTH: quantized KV-cache without FA gets dequantized every
+      # step and can be slower than f16, so FA has to be controlled here, not a confound.
       - { label: kv-f16, variant: q4_0, threads: 4, flash_attn: "on" }
       - label: kv-q8_0
         variant: q4_0
@@ -62,8 +66,8 @@ experiments:
     workload: rag-context
     configs:
       # -ub is the physical micro-batch used during prompt processing; larger values feed the
-      # KleidiAI/i8mm matmul kernels bigger tiles (community-reported prefill gains up to
-      # 2x). Costs RAM, not accuracy — the quality probe should be flat across these.
+      # KleidiAI/i8mm matmul kernels bigger tiles (community-reported prefill gains up to 2x).
+      # Costs RAM, not accuracy: the quality probe should be flat across these.
       - { label: ub256, variant: q4_0, ubatch_size: 256 }
       - { label: ub512, variant: q4_0, ubatch_size: 512 }   # llama-bench default
       - { label: ub1024, variant: q4_0, ubatch_size: 1024 }
@@ -74,29 +78,79 @@ experiments:
     model: qwen2.5-0.5b-instruct
     workload: rag-context
     configs:
-      # -fa defaults to 'auto'; we pin it explicitly both ways to measure the CPU FA path
-      # at our prompt lengths rather than trusting the auto heuristic.
+      # -fa defaults to 'auto'. Pin it both ways so we measure the CPU FA path at our prompt
+      # lengths instead of trusting the auto heuristic.
       - { label: fa-off, variant: q4_0, flash_attn: "off" }
       - { label: fa-on, variant: q4_0, flash_attn: "on" }
 
   build-flags:
-    description: "Compiler targeting: default build vs -mcpu=native (the official AWS/Arm recipe)."
+    description: "Compiler targeting: generic armv8-a floor vs the native(+repack) default build."
     model: qwen2.5-0.5b-instruct
     workload: rag-context
     configs:
-      # -mcpu=native unlocks SVE/i8mm (MMLA) code paths on Graviton3/4; it is the exact build
-      # both aws-graviton-getting-started and learn.arm.com prescribe. (GGML_SVE was removed
-      # upstream — cross-compilers use -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv9-a+i8mm+dotprod.)
-      - { label: default-build, variant: q4_0, bin: "${LLAMA_BASELINE_BIN}" }
-      - { label: mcpu-native, variant: q4_0, bin: "${LLAMA_MCPU_BIN}" }
+      # A plain Release build is already native-targeted: GGML_NATIVE defaults ON (the
+      # -mcpu=native-equivalent that aws-graviton-getting-started and learn.arm.com
+      # prescribe) and GGML_CPU_REPACK defaults ON (both verified in b9873's
+      # ggml/CMakeLists.txt, 2026-08-08). So the honest comparison is a generic armv8-a
+      # build with both OFF vs that default. Default-vs--mcpu=native is native-vs-native
+      # and would measure only runner noise.
+      - { label: armv8-generic, variant: q4_0, flash_attn: "on", bin: "${LLAMA_GENERIC_BIN}" }
+      - { label: native-repack, variant: q4_0, flash_attn: "on", bin: "${LLAMA_BASELINE_BIN}" }
 
   kleidiai:
-    description: "KleidiAI ON vs OFF on the same Q4_0 model (two llama.cpp builds)."
-    model: qwen2.5-0.5b-instruct             # official q4_0 (verified 2026-07-07)
+    description: "Attribution ladder: generic armv8-a -> ggml aarch64 repack -> KleidiAI, same Q4_0 model."
+    # 1.5B is the headline model: big enough to be memory-bound like real serving (a 0.5B
+    # fits too much of its working set in cache to be representative). URLs verified
+    # 2026-07-30 (q4_0 = 1.07 GB). The smoke/secondary experiments keep the 0.5B.
+    model: qwen2.5-1.5b-instruct
+    workload: long-context
+    configs:
+      # Three rungs, three builds, so every delta has a named mechanism:
+      #   generic  = GGML_NATIVE=OFF GGML_CPU_ARM_ARCH=armv8-a GGML_CPU_REPACK=OFF (the floor)
+      #   repack   = plain Release: native targeting + ggml's own aarch64 Q4_0 repack GEMM
+      #              (GGML_CPU_REPACK defaults ON — verified b9873 ggml/CMakeLists.txt)
+      #   kleidiai = repack build + -DGGML_CPU_KLEIDIAI=ON (Arm's kernels take over)
+      # The harness proves which build has KleidiAI active (CPU_KLEIDIAI load-log detection)
+      # and records it in the report's `kleidiai` column. flash_attn pinned on all rungs.
+      - { label: generic, variant: q4_0, flash_attn: "on", bin: "${LLAMA_GENERIC_BIN}" }
+      - { label: repack, variant: q4_0, flash_attn: "on", bin: "${LLAMA_BASELINE_BIN}" }
+      - { label: kleidiai, variant: q4_0, flash_attn: "on", bin: "${LLAMA_KLEIDIAI_BIN}" }
+
+  kleidiai-q8_0:
+    description: "The same ladder at Q8_0 — where KleidiAI's delta is not already eaten by ggml's repack."
+    # WHY THIS EXISTS: ggml's built-in aarch64 repack path targets Q4_0, so on Q4_0 the
+    # `repack` rung above already captures most of the available headroom and KleidiAI's
+    # own contribution looks small. Q8_0 is the quant where KleidiAI's kernels have room to
+    # show a clean delta. Running BOTH quants is the only way to say which mechanism owns
+    # which win, instead of reporting one number and guessing.
+    model: qwen2.5-1.5b-instruct
+    workload: rag-context          # shorter sweep than long-context: this is a second axis, not the headline
+    configs:
+      - { label: generic-q8, variant: q8_0, flash_attn: "on", bin: "${LLAMA_GENERIC_BIN}" }
+      - { label: repack-q8, variant: q8_0, flash_attn: "on", bin: "${LLAMA_BASELINE_BIN}" }
+      - { label: kleidiai-q8, variant: q8_0, flash_attn: "on", bin: "${LLAMA_KLEIDIAI_BIN}" }
+
+  kleidiai-null-control:
+    description: "Negative control: the KleidiAI build on Q4_K_M, which its kernels cannot accelerate."
+    # The harness catching a false claim. KleidiAI has kernels for Q4_0/Q8_0 only, so on a
+    # k-quant the KleidiAI build falls back to generic ggml kernels and upstream logs
+    # "not accelerated by KleidiAI" (llama.cpp PR #25701, merged 2026-07-21). Our probe must
+    # report kleidiai INACTIVE for the kleidiai-build row here, and any speed difference must
+    # therefore NOT be attributed to KleidiAI. If this control ever shows KleidiAI active on a
+    # k-quant, the detection is broken and every other result is suspect.
+    model: qwen2.5-1.5b-instruct
     workload: rag-context
     configs:
-      # Point these at two builds: a baseline build and one built with -DGGML_CPU_KLEIDIAI=ON.
-      # The harness PROVES which build has KleidiAI active (CPU_KLEIDIAI load-log detection)
-      # and records it in the report's `kleidiai` column.
-      - { label: baseline, variant: q4_0, bin: "${LLAMA_BASELINE_BIN}" }
-      - { label: kleidiai, variant: q4_0, bin: "${LLAMA_KLEIDIAI_BIN}" }
+      - { label: kq-repack-build, variant: q4_k_m, flash_attn: "on", bin: "${LLAMA_BASELINE_BIN}" }
+      - { label: kq-kleidiai-build, variant: q4_k_m, flash_attn: "on", bin: "${LLAMA_KLEIDIAI_BIN}" }
+
+  noise-floor:
+    description: "Same build, same config, run twice (ctrl-a vs ctrl-b) — the measurement noise yardstick."
+    model: qwen2.5-0.5b-instruct
+    workload: rag-context
+    configs:
+      # Two identical configs. Any 'speedup' between them is runner noise (co-tenancy,
+      # thermal, cache state), so this spread is the floor a real delta must clear to
+      # mean anything. Publish it next to the headline.
+      - { label: ctrl-a, variant: q4_0, flash_attn: "on" }
+      - { label: ctrl-b, variant: q4_0, flash_attn: "on" }

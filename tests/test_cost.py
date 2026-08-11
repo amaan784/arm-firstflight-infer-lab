@@ -28,7 +28,8 @@ def test_compute_result():
     assert "$" in r.format_usd_per_mtok()
 
 
-def test_compute_unpriced():
+def test_compute_zero_price_is_free_runner():
+    # 0.0 is a real price (free CI runner / free tier), not a missing configuration
     r = cost.compute(50.0, 0.0)
     assert r.priced is False
-    assert "n/a" in r.format_usd_per_mtok()
+    assert "free" in r.format_usd_per_mtok()

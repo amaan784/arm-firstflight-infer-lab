@@ -37,7 +37,7 @@ def test_build_cmd_kv_cache_types():
     )
     assert cmd[cmd.index("-ctk") + 1] == "q8_0"
     assert cmd[cmd.index("-ctv") + 1] == "q8_0"
-    # default: no cache flags at all
+    # default: no cache flags
     plain = prefill.build_llama_bench_command(Path("b"), Path("m"), [128], [0])
     assert "-ctk" not in plain and "-ctv" not in plain
 
@@ -56,3 +56,38 @@ def test_build_cmd_ubatch_and_flash_attn():
 def test_ttft_derivation():
     assert math.isclose(prefill.ttft_seconds(100.0, 200), 2.0)
     assert math.isinf(prefill.ttft_seconds(0.0, 200))
+
+
+def test_build_cmd_steadiness_flags():
+    # --prio / -mmp / --delay verified against the real b9873 llama-bench --help (2026-08-09)
+    cmd = prefill.build_llama_bench_command(
+        Path("b"), Path("m"), [128], [0], prio=2, mmap=False, delay=2
+    )
+    assert cmd[cmd.index("--prio") + 1] == "2"
+    assert cmd[cmd.index("-mmp") + 1] == "0"
+    assert cmd[cmd.index("--delay") + 1] == "2"
+    # defaults (None) leave the command unchanged for other call sites
+    plain = prefill.build_llama_bench_command(Path("b"), Path("m"), [128], [0])
+    for flag in ("--prio", "-mmp", "--delay"):
+        assert flag not in plain
+
+
+def test_sweep_timeout_is_bencherror_not_crash(monkeypatch):
+    import subprocess
+
+    def boom(cmd, timeout):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(prefill, "run_with_peak_rss", boom)
+    with pytest.raises(prefill.BenchError, match="timed out"):
+        prefill.run_sweep(
+            bench_bin=Path("b"),
+            model_path=Path("m"),
+            model_id="x",
+            variant="q4_0",
+            workload_name="w",
+            prompt_lengths=[128],
+            n_gen=32,
+            threads=None,
+            repetitions=1,
+        )

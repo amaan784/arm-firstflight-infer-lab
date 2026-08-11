@@ -20,7 +20,7 @@ def test_probe_is_large_enough():
 
 
 def test_run_probe_scored_and_greedy(monkeypatch):
-    # Stub llama_cpp.run_once: return the gold answer for even-indexed items, junk otherwise.
+    # stub run_once: gold answer for even-indexed items, junk otherwise
     state = {"i": 0, "temps": []}
 
     def fake_run_once(cli_bin, model_path, *, prompt, n_predict, threads=None, seed=42, temp=None):

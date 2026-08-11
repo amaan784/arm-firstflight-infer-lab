@@ -1,9 +1,8 @@
-"""Test isolation: keep the suite hermetic regardless of the developer's machine state.
+"""Keep the suite hermetic regardless of the developer's machine state.
 
-`firstflight setup-engine` drops real llama.cpp binaries into ./engine, which `find_binary`
-picks up automatically — great for users, but the "skips cleanly without a binary" tests must
-not accidentally find it. Point the engine dir at a nonexistent path for every test; tests
-that WANT a binary set LLAMA_CPP_BIN / env_value explicitly.
+`firstflight setup-engine` drops real llama.cpp binaries into ./engine and `find_binary` picks
+them up, which breaks the "skips without a binary" tests. Point the engine dir at a nonexistent
+path for every test; tests that WANT a binary set LLAMA_CPP_BIN / env_value themselves.
 """
 
 import pytest

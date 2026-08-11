@@ -62,30 +62,32 @@ def test_autotune_enable_skips_without_binary(monkeypatch):
     assert "skip" in res.output.lower()
 
 
-def test_experiment_skips_without_binary(monkeypatch):
+def test_experiment_zero_configs_exits_red(monkeypatch):
+    # Zero-of-N configs running is a failure (an env/plumbing mistake in CI would otherwise
+    # produce a green run with an empty report), unlike smoke/bench's clean single-skip.
     monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
     monkeypatch.setenv("PATH", "")
     res = CliRunner().invoke(main, ["experiment", "--no-download", "--no-report"])
-    assert res.exit_code == 0
-    assert "skip" in res.output.lower() or "no configs" in res.output.lower()
+    assert res.exit_code == 1
+    assert "no configs ran" in res.output.lower()
 
 
 def test_profile_noop_off_arm():
-    # On a non-Arm-Linux machine, profile no-ops cleanly (exit 0) with a clear reason.
+    # off Arm Linux, profile no-ops with exit 0 and a reason
     res = CliRunner().invoke(main, ["profile"])
     assert res.exit_code == 0
     assert "unavailable" in res.output.lower()
 
 
 def test_report_no_results_is_graceful(tmp_path):
-    # empty results dir -> friendly message, exit 0 (no matplotlib needed for this path)
+    # empty results dir -> message, exit 0. no matplotlib on this path.
     res = CliRunner().invoke(main, ["report", "--results-dir", str(tmp_path)])
     assert res.exit_code == 0
     assert "no results" in res.output.lower()
 
 
 def test_smoke_skips_without_binary(monkeypatch):
-    # No binary on PATH and no LLAMA_CPP_BIN -> clean skip (exit 0), no download attempted.
+    # no binary on PATH, no LLAMA_CPP_BIN -> skip with exit 0, no download attempted
     monkeypatch.delenv("LLAMA_CPP_BIN", raising=False)
     monkeypatch.setenv("PATH", "")
     res = CliRunner().invoke(main, ["smoke"])

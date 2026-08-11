@@ -23,7 +23,7 @@ def test_parse_hotspots_json():
 
 
 def test_parse_hotspots_box_table():
-    # The ┃-delimited Unicode table apx render emits (columns from Arm's code_hotspots query).
+    # the ┃-delimited table apx render emits (columns from Arm's code_hotspots query)
     text = (
         "┃ function_name ┃ node_type ┃ periodic_samples_self ┃ periodic_samples_self_percent ┃\n"
         "┃ __complex_abs ┃ function ┃ 65213 ┃ 65.2 ┃\n"
@@ -59,7 +59,7 @@ def test_build_recipe_run_cmd():
 
 
 def test_profiler_off_arm_is_skip():
-    # On a non-Arm-Linux machine, Performix is unavailable and profile() skips (never raises).
+    # off Arm Linux, Performix is unavailable and profile() skips instead of raising
     prof = PerformixProfiler()
     assert prof.available() is False
     res = prof.profile(["echo", "hi"])

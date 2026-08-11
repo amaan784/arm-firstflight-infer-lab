@@ -10,7 +10,7 @@ workloads:
     prompt_lengths: [128, 512, 2048, 8192, 16384, 32768]
     gen_lengths: [32]
     repeats: 5          # timed repeats per point (variance)
-    warmup: 1           # informational — llama-bench's own warm-up (on by default) applies
+    warmup: 1           # informational; llama-bench's own warm-up (on by default) applies
 
   quick-smoke:
     description: "Tiny end-to-end sanity check (any machine)."
@@ -23,5 +23,14 @@ workloads:
     description: "Representative RAG context sizes."
     prompt_lengths: [2048, 4096, 8192]
     gen_lengths: [64]
+    repeats: 3
+    warmup: 1
+
+  long-context:
+    description: "Long-context ladder for the headline experiment — where prefill actually hurts."
+    # 16k is the largest point that fits a shared 4-vCPU CI runner in reasonable wall-clock;
+    # the full 128..32768 curve comes from `make bench` (prefill-scaling) on a real Arm box.
+    prompt_lengths: [2048, 8192, 16384]
+    gen_lengths: [32]
     repeats: 3
     warmup: 1

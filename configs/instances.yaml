@@ -1,8 +1,9 @@
 # Instance cost table for the $/M-token calculation (see src/firstflight/cost.py).
 #
-# Prices below were verified against AWS's own on-demand pricing feed and Oracle's price-list
-# API on 2026-07-05 (Linux, us-east-1 for AWS; OCI list prices are globally uniform).
-# TODO(confirm): re-check for YOUR region/date before submission — prices drift.
+# Prices verified against AWS's on-demand pricing feed and Oracle's price-list API on
+# 2026-07-05 (Linux, us-east-1 for AWS; OCI list prices are globally uniform). Each entry
+# carries its own verification date. Prices drift by region and over time, so re-check for the
+# instance and region you actually benchmark on; the report prints whichever entry it used.
 
 default_instance: aws-graviton4-c8g-2xlarge
 

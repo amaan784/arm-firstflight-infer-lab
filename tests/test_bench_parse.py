@@ -6,8 +6,8 @@ import pytest
 from firstflight.bench import prefill
 from firstflight.bench.result import EngineInfo, HostInfo, ModelInfo, SweepResult
 
-# Representative `llama-bench -o json` output (confirmed schema 2026-06-26): a top-level
-# array of row objects, pp rows (n_gen==0) + a tg row (n_prompt==0), with avg_ts/stddev_ts.
+# `llama-bench -o json` output, schema confirmed 2026-06-26: top-level array of rows,
+# pp rows (n_gen==0) + a tg row (n_prompt==0), with avg_ts/stddev_ts.
 _COMMON = {
     "build_commit": "abc1234",
     "build_number": 9821,

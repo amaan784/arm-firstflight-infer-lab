@@ -10,7 +10,7 @@ def test_build_prefix_scales():
     short = ttft.build_prefix(256)
     long = ttft.build_prefix(4096)
     assert len(long) > len(short) * 8
-    # deterministic: same input -> same prefix (reproducible measurements)
+    # deterministic: same input -> same prefix
     assert ttft.build_prefix(1024) == ttft.build_prefix(1024)
 
 

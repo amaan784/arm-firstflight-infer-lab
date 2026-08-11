@@ -34,7 +34,7 @@ def test_optimize_patience_and_best():
     best = out.best()
     assert best.config.key() == ("q4_0", 4, "")
     assert best.score == 100.0
-    # best, then two non-improving trials hit patience=2 -> stop after 3 trials.
+    # best + two non-improving trials hits patience=2, so 3 trials total.
     assert len(out.history) == 3
 
 
@@ -45,7 +45,7 @@ def test_parse_config():
         8,
         "",
     )
-    # snap an out-of-range thread count to the nearest allowed option
+    # out-of-range thread count snaps to the nearest allowed option
     assert parse_config('{"variant":"q4_0","threads":5}', variants, threads).threads == 4
     assert parse_config('{"variant":"nope"}', variants, threads) is None
     assert parse_config("no json here", variants, threads) is None

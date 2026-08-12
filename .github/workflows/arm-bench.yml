@@ -81,9 +81,22 @@ jobs:
       - name: Remove committed synthetic examples (real runs must stay pure)
         run: rm -f bench/results/example_*.json bench/results/profile_example.json
 
+      # Its own step so a slow HF transfer is visible as a download rather than looking like
+      # a hung benchmark, and so the cache save below banks it even if smoke later fails.
+      - name: Pre-download the smoke model (resumable, retried)
+        run: |
+          firstflight download
+          ls -lh models/
+
+      - name: Save model cache early (bank the download before inference)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+
       - name: Smoke (real inference on Arm)
-        # Shared runners have slow-I/O days: cold-loading the 470MB model can exceed the
-        # 90s local default (observed run #6, download at 5-8MB/s). 300s absorbs that.
+        # Model is already cached by the step above, so this is load + 24 tokens.
         run: firstflight smoke --timeout 300
 
       - name: Baseline prefill sweep (light workload — this job runs on every push)
@@ -223,6 +236,7 @@ jobs:
       - name: Pre-download models (resumable, retried)
         run: |
           firstflight download --model qwen2.5-0.5b-instruct --variant q4_0
+          firstflight download --model qwen2.5-0.5b-instruct --variant q4_k_m
           firstflight download --model qwen2.5-1.5b-instruct --variant q4_0
           firstflight download --model qwen2.5-1.5b-instruct --variant q8_0
           firstflight download --model qwen2.5-1.5b-instruct --variant q4_k_m

@@ -71,9 +71,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: models
-          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          key: models-v2-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
           restore-keys: |
-            models-${{ hashFiles('configs/models.yaml') }}-
+            models-v2-${{ hashFiles('configs/models.yaml') }}-
 
       - name: Environment report
         run: firstflight info
@@ -93,11 +93,11 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: models
-          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          key: models-v2-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
 
       - name: Smoke (real inference on Arm)
         # Model is already cached by the step above, so this is load + 24 tokens.
-        run: firstflight smoke --timeout 300
+        run: firstflight smoke --timeout 180
 
       - name: Baseline prefill sweep (light workload — this job runs on every push)
         run: firstflight bench --label baseline --workload rag-context --repetitions 2
@@ -122,7 +122,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: models
-          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          key: models-v2-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
 
       - name: Upload results + report
         if: always()
@@ -171,9 +171,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: models
-          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          key: models-v2-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
           restore-keys: |
-            models-${{ hashFiles('configs/models.yaml') }}-
+            models-v2-${{ hashFiles('configs/models.yaml') }}-
 
       # ttft/throughput need llama-server + llama-batched-bench from the kleidiai build.
       # Keep them in the target list or those steps silently skip.
@@ -247,7 +247,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: models
-          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          key: models-v2-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
 
       - name: "Noise floor: same build twice (ctrl-a vs ctrl-b) — the honesty yardstick"
         env:
@@ -342,7 +342,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: models
-          key: models-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
+          key: models-v2-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
 
       - name: Render the combined report (priced at this runner's $0/hr)
         run: firstflight report --instance github-arm-runner

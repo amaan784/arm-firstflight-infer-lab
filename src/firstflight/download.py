@@ -91,6 +91,34 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+GGUF_MAGIC = b"GGUF"
+
+
+def check_gguf(path: Path, min_bytes: int = 0) -> str:
+    """Why `path` is not a usable GGUF, or "" if it looks fine.
+
+    Existence is not enough. An interrupted transfer, a cached truncation, or an HTML error
+    page saved under a .gguf name all pass an exists() check and then hang or crash the
+    engine much later, where the cause is unrecognizable.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return f"unreadable ({exc})"
+    if size < 1024:
+        return f"far too small ({size} bytes)"
+    if min_bytes and size < min_bytes:
+        return f"truncated: {bytes_human(size)} < expected {bytes_human(min_bytes)}"
+    try:
+        with path.open("rb") as fh:
+            magic = fh.read(4)
+    except OSError as exc:
+        return f"unreadable ({exc})"
+    if magic != GGUF_MAGIC:
+        return f"not a GGUF file (magic {magic!r})"
+    return ""
+
+
 def ensure_model(
     spec: ModelSpec,
     variant: ModelVariant,
@@ -108,14 +136,20 @@ def ensure_model(
     target = dest_dir / variant.file
 
     if target.exists() and not force:
-        if variant.sha256:
+        problem = check_gguf(target, variant.min_bytes)
+        if problem:
+            console.print(f"[yellow]![/] cached {target.name} is {problem}; re-downloading")
+            target.unlink(missing_ok=True)
+        elif variant.sha256:
             actual = _sha256(target)
             if actual == variant.sha256:
                 console.print(f"[green]OK[/] cached & verified: {target.name}")
                 return target
             console.print(f"[yellow]![/] checksum mismatch for {target.name}, re-downloading")
         else:
-            console.print(f"[green]OK[/] cached: {target.name}")
+            console.print(
+                f"[green]OK[/] cached: {target.name} ({bytes_human(target.stat().st_size)})"
+            )
             return target
 
     if not variant.url:
@@ -128,6 +162,11 @@ def ensure_model(
     if force:
         tmp.unlink(missing_ok=True)
     _fetch_with_resume(variant.url, tmp, variant.file)
+
+    problem = check_gguf(tmp, variant.min_bytes)
+    if problem:
+        tmp.unlink(missing_ok=True)
+        raise DownloadError(f"{variant.file} downloaded but is {problem}")
 
     if variant.sha256:
         actual = _sha256(tmp)

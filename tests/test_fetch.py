@@ -152,3 +152,55 @@ def test_download_gives_up_with_clear_error(tmp_path, monkeypatch):
 
     with pytest.raises(dl.DownloadError, match="giving up"):
         dl._fetch_with_resume("http://x/m.gguf", tmp_path / "m.gguf.part", "m.gguf")
+
+
+# --- cached-model validation --------------------------------------------------
+
+
+def test_check_gguf_accepts_valid_file(tmp_path):
+    from firstflight.download import check_gguf
+
+    p = tmp_path / "ok.gguf"
+    p.write_bytes(b"GGUF" + b"\0" * 4096)
+    assert check_gguf(p) == ""
+    assert check_gguf(p, min_bytes=1000) == ""
+
+
+def test_check_gguf_rejects_truncated_and_wrong_magic(tmp_path):
+    """A cache hit must not be trusted on existence alone.
+
+    A truncated GGUF passes exists(), then hangs or crashes the engine much later where the
+    cause is unrecognizable. Size and magic are checked instead.
+    """
+    from firstflight.download import check_gguf
+
+    truncated = tmp_path / "short.gguf"
+    truncated.write_bytes(b"GGUF" + b"\0" * 4096)
+    assert "truncated" in check_gguf(truncated, min_bytes=10_000_000)
+
+    html = tmp_path / "err.gguf"
+    html.write_bytes(b"<!DOCTYPE html>" + b" " * 4096)
+    assert "not a GGUF" in check_gguf(html)
+
+    tiny = tmp_path / "tiny.gguf"
+    tiny.write_bytes(b"GG")
+    assert "too small" in check_gguf(tiny)
+
+    assert "unreadable" in check_gguf(tmp_path / "missing.gguf")
+
+
+def test_ensure_model_redownloads_a_corrupt_cache(tmp_path, monkeypatch):
+    from firstflight import download as dl
+    from firstflight.config import ModelSpec, ModelVariant
+
+    target = tmp_path / "m.gguf"
+    target.write_bytes(b"GGUF" + b"\0" * 5000)  # present but far below min_bytes
+    variant = ModelVariant(name="q4_0", file="m.gguf", url="http://x/m.gguf", min_bytes=10_000_000)
+    spec = ModelSpec(id="m", hf_repo="r", description="d", variants={"q4_0": variant})
+
+    def fake_fetch(url, tmp, label):
+        tmp.write_bytes(b"GGUF" + b"\0" * 20_000_000)  # a good file this time
+
+    monkeypatch.setattr(dl, "_fetch_with_resume", fake_fetch)
+    out = dl.ensure_model(spec, variant, dest_dir=tmp_path)
+    assert out.stat().st_size > 10_000_000  # the bad cache was replaced

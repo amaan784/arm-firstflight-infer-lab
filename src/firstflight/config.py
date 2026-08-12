@@ -38,6 +38,7 @@ class ModelVariant:
     file: str
     url: str
     sha256: str = ""
+    min_bytes: int = 0  # floor for detecting a truncated download/cache; 0 = unchecked
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ def load_models(path: Path | None = None) -> ModelsConfig:
                 file=str(vraw.get("file", "")),
                 url=str(vraw.get("url", "")),
                 sha256=str(vraw.get("sha256", "") or ""),
+                min_bytes=int(vraw.get("min_bytes", 0) or 0),
             )
             for vname, vraw in (raw.get("variants") or {}).items()
         }

@@ -28,10 +28,12 @@ models:
       q4_0:
         file: qwen2.5-0.5b-instruct-q4_0.gguf
         url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf"  # verified 2026-07-07 (GGUF magic + 428MB)
+        min_bytes: 400000000        # ~428 MB verified; below this the file is truncated
         sha256: ""
       q4_k_m:
         file: qwen2.5-0.5b-instruct-q4_k_m.gguf
         url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"  # verified 2026-06-26
+        min_bytes: 460000000        # ~491 MB (468.6 MiB) observed on download
         sha256: ""
       q8_0:
         file: qwen2.5-0.5b-instruct-q8_0.gguf
@@ -67,13 +69,16 @@ models:
       q4_0:
         file: qwen2.5-1.5b-instruct-q4_0.gguf
         url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_0.gguf"  # verified 2026-07-30 (1.07 GB)
+        min_bytes: 1000000000       # ~1.07 GB verified
         sha256: ""
       q4_k_m:
         file: qwen2.5-1.5b-instruct-q4_k_m.gguf
         url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"  # verified 2026-07-30 (1.12 GB)
+        min_bytes: 1050000000       # ~1.12 GB verified
         sha256: ""
       q8_0:
         file: qwen2.5-1.5b-instruct-q8_0.gguf
         url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q8_0.gguf"  # verified 2026-07-30 (1.89 GB)
+        min_bytes: 1800000000       # ~1.89 GB verified
         sha256: ""
   # Even larger (3B+) targets: verify URLs the same way before adding (ranged GET, GGUF magic).

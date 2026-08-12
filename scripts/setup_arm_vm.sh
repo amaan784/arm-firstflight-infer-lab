@@ -48,7 +48,7 @@ if [ "$WITH_KLEIDIAI" = "1" ]; then
 fi
 cmake -B build "${CMAKE_FLAGS[@]}"
 cmake --build build --config Release -j"$(nproc)"
-echo "    built: $(ls build/bin/llama-bench build/bin/llama-cli 2>/dev/null || true)"
+echo "    built: $(ls build/bin/llama-bench build/bin/llama-completion 2>/dev/null || true)"
 cd "$WORKDIR"
 
 if [ "$INSTALL_PERFORMIX" = "1" ]; then

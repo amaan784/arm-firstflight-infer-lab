@@ -420,7 +420,7 @@ def build_report_model(
 
     has_quality = any(_quality_acc(r.quality) is not None for r in results)
     quality = (
-        "Quality = a small exact-match probe via llama-cli (a regression guardrail, not a "
+        "Quality = a small exact-match probe via llama-completion (a regression guardrail, not a "
         "leaderboard) showing the speedup did not tank accuracy."
         if has_quality
         else "Run `firstflight experiment` to add the quality-delta column (proves the "

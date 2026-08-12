@@ -56,7 +56,7 @@ def info() -> None:
 
     cli = llama_cpp.find_binary("cli")
     bench = llama_cpp.find_binary("bench")
-    table.add_row("llama-cli", str(cli) if cli else "[yellow]not found[/]")
+    table.add_row("llama-completion", str(cli) if cli else "[yellow]not found[/]")
     table.add_row("llama-bench", str(bench) if bench else "[yellow]not found[/]")
     table.add_row("performix (apx)", "available" if PerformixProfiler().available() else "n/a")
 

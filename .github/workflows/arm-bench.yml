@@ -188,12 +188,12 @@ jobs:
       - name: Build llama.cpp GENERIC (armv8-a floor, repack+native OFF)
         run: |
           set -euxo pipefail
-          if [ ! -e llama-generic/build/bin/llama-bench ] || [ ! -e llama-generic/build/bin/llama-perplexity ]; then
+          if [ ! -e llama-generic/build/bin/llama-bench ] || [ ! -e llama-generic/build/bin/llama-completion ] || [ ! -e llama-generic/build/bin/llama-perplexity ]; then
             rm -rf llama-generic
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-generic
             cmake -S llama-generic -B llama-generic/build -DCMAKE_BUILD_TYPE=Release \
               -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a -DGGML_CPU_REPACK=OFF -DGGML_CPU_KLEIDIAI=OFF
-            cmake --build llama-generic/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-perplexity
+            cmake --build llama-generic/build --config Release -j"$(nproc)" --target llama-bench llama-completion llama-perplexity
           else
             echo "cache hit - reusing llama-generic build"
           fi
@@ -201,11 +201,11 @@ jobs:
       - name: Build llama.cpp BASELINE (default Release = native + aarch64 repack)
         run: |
           set -euxo pipefail
-          if [ ! -e llama-baseline/build/bin/llama-bench ] || [ ! -e llama-baseline/build/bin/llama-server ] || [ ! -e llama-baseline/build/bin/llama-perplexity ]; then
+          if [ ! -e llama-baseline/build/bin/llama-bench ] || [ ! -e llama-baseline/build/bin/llama-completion ] || [ ! -e llama-baseline/build/bin/llama-server ] || [ ! -e llama-baseline/build/bin/llama-perplexity ]; then
             rm -rf llama-baseline
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-baseline
             cmake -S llama-baseline -B llama-baseline/build -DCMAKE_BUILD_TYPE=Release
-            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench llama-perplexity
+            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-completion llama-server llama-batched-bench llama-perplexity
           else
             echo "cache hit - reusing llama-baseline build"
           fi
@@ -213,11 +213,11 @@ jobs:
       - name: Build llama.cpp KLEIDIAI (-DGGML_CPU_KLEIDIAI=ON)
         run: |
           set -euxo pipefail
-          if [ ! -e llama-kleidiai/build/bin/llama-bench ] || [ ! -e llama-kleidiai/build/bin/llama-server ] || [ ! -e llama-kleidiai/build/bin/llama-batched-bench ] || [ ! -e llama-kleidiai/build/bin/llama-perplexity ]; then
+          if [ ! -e llama-kleidiai/build/bin/llama-bench ] || [ ! -e llama-kleidiai/build/bin/llama-completion ] || [ ! -e llama-kleidiai/build/bin/llama-server ] || [ ! -e llama-kleidiai/build/bin/llama-batched-bench ] || [ ! -e llama-kleidiai/build/bin/llama-perplexity ]; then
             rm -rf llama-kleidiai
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-kleidiai
             cmake -S llama-kleidiai -B llama-kleidiai/build -DCMAKE_BUILD_TYPE=Release -DGGML_CPU_KLEIDIAI=ON
-            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-cli llama-server llama-batched-bench llama-perplexity
+            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-completion llama-server llama-batched-bench llama-perplexity
           else
             echo "cache hit - reusing llama-kleidiai build"
           fi

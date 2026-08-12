@@ -53,7 +53,7 @@ jobs:
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-generic
             cmake -S llama-generic -B llama-generic/build -DCMAKE_BUILD_TYPE=Release \
               -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a -DGGML_CPU_REPACK=OFF -DGGML_CPU_KLEIDIAI=OFF
-            cmake --build llama-generic/build --config Release -j"$(nproc)" --target llama-bench llama-cli
+            cmake --build llama-generic/build --config Release -j"$(nproc)" --target llama-bench llama-completion
           fi
 
       - name: Build BASELINE (default Release = native + aarch64 repack)
@@ -63,7 +63,7 @@ jobs:
             rm -rf llama-baseline
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-baseline
             cmake -S llama-baseline -B llama-baseline/build -DCMAKE_BUILD_TYPE=Release
-            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-cli
+            cmake --build llama-baseline/build --config Release -j"$(nproc)" --target llama-bench llama-completion
           fi
 
       - name: Build KLEIDIAI (-DGGML_CPU_KLEIDIAI=ON)
@@ -73,7 +73,7 @@ jobs:
             rm -rf llama-kleidiai
             git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp.git llama-kleidiai
             cmake -S llama-kleidiai -B llama-kleidiai/build -DCMAKE_BUILD_TYPE=Release -DGGML_CPU_KLEIDIAI=ON
-            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-cli
+            cmake --build llama-kleidiai/build --config Release -j"$(nproc)" --target llama-bench llama-completion
           fi
 
       - name: RUN YOUR BENCHMARK HERE (once per build; interleave rounds; use a Q4_0 GGUF)

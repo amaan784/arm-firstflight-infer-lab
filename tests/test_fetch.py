@@ -52,8 +52,21 @@ def test_explicit_env_override_wins(monkeypatch, tmp_path):
 def test_detect_kleidiai(monkeypatch, tmp_path):
     from pathlib import Path
 
+    seen = {}
+
     def fake_run(stderr_text, ok=True):
-        def fn(cli_bin, model_path, *, prompt, n_predict, threads=None, seed=42, timeout=300.0):
+        def fn(
+            cli_bin,
+            model_path,
+            *,
+            prompt,
+            n_predict,
+            threads=None,
+            seed=42,
+            timeout=300.0,
+            verbose=False,
+        ):
+            seen["verbose"] = verbose
             return llama_cpp.RunResult(
                 returncode=0 if ok else 1, stdout="hello", stderr=stderr_text, wall_s=0.1, cmd=[]
             )
@@ -64,12 +77,43 @@ def test_detect_kleidiai(monkeypatch, tmp_path):
         llama_cpp, "run_once", fake_run("load_tensors: CPU_KLEIDIAI model buffer size = 100 MiB")
     )
     assert llama_cpp.detect_kleidiai(Path("x"), Path("m")) is True
+    # llama-completion only prints the load_tensors: lines that carry the marker at raised
+    # verbosity — without this the probe would report "inactive" for every run.
+    assert seen["verbose"] is True
 
     monkeypatch.setattr(llama_cpp, "run_once", fake_run("load_tensors: CPU model buffer size"))
     assert llama_cpp.detect_kleidiai(Path("x"), Path("m")) is False
 
     monkeypatch.setattr(llama_cpp, "run_once", fake_run("boom", ok=False))
     assert llama_cpp.detect_kleidiai(Path("x"), Path("m")) is None
+
+
+# Verbatim shape of a real `llama-completion -v` load log (b9873, 2026-08-12): the kernel
+# buffer type is printed twice — a 0.00 MiB placeholder first, the real size later — and the
+# mmap'd weights show up as their own CPU_Mapped buffer in between.
+_REAL_LOAD_LOG = """\
+0.00.371 I load_tensors:          CPU model buffer size =     0.00 MiB
+0.00.371 I load_tensors:   CPU_REPACK model buffer size =     0.00 MiB
+0.00.701 I load_tensors:   CPU_Mapped model buffer size =   462.96 MiB
+0.00.701 I load_tensors:   CPU_REPACK model buffer size =    28.05 MiB
+0.04.491 I system_info: n_threads = 4 | NEON = 1 | DOTPROD = 1 | MATMUL_INT8 = 1 |
+"""
+
+
+def test_probe_backend_reports_the_real_kernel_buffer(monkeypatch):
+    from pathlib import Path
+
+    def fn(cli_bin, model_path, **kwargs):
+        return llama_cpp.RunResult(0, "hi", _REAL_LOAD_LOG, 0.1, [])
+
+    monkeypatch.setattr(llama_cpp, "run_once", fn)
+    probe = llama_cpp.probe_backend(Path("x"), Path("m"))
+
+    # Not the 0.00 MiB placeholder, and not the plain mmap'd weights.
+    assert probe.kernel_buffer == "CPU_REPACK 28.05 MiB"
+    assert probe.repack is True
+    assert probe.kleidiai is False
+    assert probe.kernel_tier == "I8MM"
 
 
 # --- model download: resume + retry -------------------------------------------

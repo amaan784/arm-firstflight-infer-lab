@@ -72,7 +72,7 @@ ggml's aarch64 repack → KleidiAI.
 > submission must carry the evidence on its own.
 
 ## How we built it
-A Python CLI over llama.cpp's own tools (`llama-bench`, `llama-cli`, `llama-server`,
+A Python CLI over llama.cpp's own tools (`llama-bench`, `llama-completion`, `llama-server`,
 `llama-batched-bench`). Every external fact (flags, JSON schemas, GGUF URLs, runner labels,
 prices) is verified against live sources or real binaries and dated in the repo. The CI
 workflow builds llama.cpp three ways (a generic armv8-a floor with repack+native OFF, the

@@ -2,7 +2,7 @@
 
 Two paths:
 
-1. **Built-in probe (default).** A fixed Q&A set run through `llama-cli` with exact-match
+1. **Built-in probe (default).** A fixed Q&A set run through `llama-completion` with exact-match
    scoring. No torch, no server, nothing beyond llama.cpp. Answers "does the
    quantized/optimized model still answer sanely?" and runs on the Arm box like the benchmark.
 
@@ -32,7 +32,7 @@ class QualityItem:
 
 # 40 items (arithmetic + factual + extraction), short answers, whole-token match, --temp 0.
 # 40 gives 2.5-point granularity, finer than the report's "held" tolerance. Raw-completion
-# style, no chat template: single-shot `llama-cli -no-cnv` skips interactive mode, and
+# style, no chat template: single-shot `llama-completion -no-cnv` skips interactive mode, and
 # base-completion prompts keep the probe identical across base and instruct models.
 PROBE: list[QualityItem] = [
     # arithmetic (15)
@@ -156,7 +156,7 @@ def run_probe(
     items: list[QualityItem] | None = None,
     seed: int = 42,
 ) -> QualityResult:
-    """Run the built-in exact-match probe through llama-cli, score accuracy."""
+    """Run the built-in exact-match probe through llama-completion, score accuracy."""
     items = items or PROBE
     details: list[QualityItemResult] = []
     correct = 0
@@ -184,7 +184,7 @@ def run_probe(
         n_correct=correct,
         accuracy=(correct / n) if n else 0.0,
         items=details,
-        notes="exact-match guardrail via llama-cli, greedy decoding (not a leaderboard)",
+        notes="exact-match guardrail via llama-completion, greedy decoding (not a leaderboard)",
     )
 
 

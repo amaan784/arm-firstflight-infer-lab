@@ -19,7 +19,7 @@ def _skip(message: str) -> int:
     console.print(f"\n[yellow]SKIP[/] {message}")
     console.print(
         "[dim]This is expected off-Arm or without a llama.cpp build. "
-        "Point [bold]LLAMA_CPP_BIN[/] at a `llama-cli` binary or an extracted "
+        "Point [bold]LLAMA_CPP_BIN[/] at a `llama-completion` binary or an extracted "
         "release directory to run the real inference.[/]\n"
     )
     return 0
@@ -40,7 +40,7 @@ def smoke(download: bool = True, n_predict: int = 24, timeout: float = 90.0) -> 
 
     cli = llama_cpp.find_binary("cli")
     if cli is None:
-        return _skip("no llama.cpp `llama-cli` binary found.")
+        return _skip("no llama.cpp `llama-completion` binary found.")
     console.print(f"Engine: [green]{cli}[/]")
 
     if not download:
@@ -57,13 +57,17 @@ def smoke(download: bool = True, n_predict: int = 24, timeout: float = 90.0) -> 
 
     if not result.ok:
         console.print(f"[red]llama.cpp exited {result.returncode}[/]")
-        if result.stderr.strip():
-            console.print(f"[dim]{safe(result.stderr.strip()[-800:])}[/]")
+        detail = result.stderr.strip()
         if "timed out" in result.stderr:
+            # Already bounded, and written front-to-back (the engine's own first words
+            # before it stalled). Tailing it would cut off the half that explains the hang.
+            console.print(f"[dim]{safe(detail)}[/]")
             console.print(
-                "[dim]Slow machine? Re-run with --timeout 300. If it still hangs, check "
-                "that the binary runs by hand with stdin redirected from null.[/]"
+                "[dim]If the engine printed a rejected flag above, that is the cause, not "
+                "the machine. Otherwise re-run with --timeout 300.[/]"
             )
+        elif detail:
+            console.print(f"[dim]{safe(detail[-800:])}[/]")
         return 1
 
     completion = result.stdout.strip()
@@ -667,7 +671,7 @@ def _experiment_round(spec, models, wl, *, quality: bool, download: bool, qmod) 
                 }
                 console.print(f"  quality: {qr.n_correct}/{qr.n_total} = {qr.accuracy:.0%}")
             else:
-                console.print("  [dim]quality skipped: no llama-cli binary[/]")
+                console.print("  [dim]quality skipped: no llama-completion binary[/]")
 
             # Perplexity: the finer instrument (the probe can't resolve ~1% shifts).
             # Best-effort: a missing binary or parse failure never sinks the experiment.

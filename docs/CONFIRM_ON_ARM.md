@@ -14,7 +14,7 @@ a different tag/date:
 | llama.cpp repo | `github.com/ggml-org/llama.cpp` (was `ggerganov`) | GitHub, 2026-06-26 |
 | llama-bench flags | `-p` prefill, `-n` gen, `-o json`, `-r`, `-t`, `-C/--cpu-mask`, `--cpu-strict`, `--no-warmup` | tools/llama-bench/README.md, 2026-06-26 |
 | llama-bench JSON schema | top-level array; `avg_ts`/`stddev_ts`/`n_prompt`/`n_gen`/… | llama-bench.cpp source, 2026-06-26 |
-| llama-cli flags | `-t`, `-n`, `-s`, `-no-cnv`, `--no-display-prompt` | real b9873 binary `--help`, 2026-07-07 |
+| llama-completion flags | `-t`, `-n`, `-s`, `-no-cnv`, `--no-display-prompt`, `-v` | real b9873 binary `--help`, 2026-08-12 |
 | llama-bench KV-cache flags | `-ctk/--cache-type-k`, `-ctv/--cache-type-v` (default f16) | real b9873 binary `--help`, 2026-07-07 |
 | CPU build | `cmake -B build && cmake --build build --config Release` | docs/build.md, 2026-06-26 |
 | KleidiAI flag | `-DGGML_CPU_KLEIDIAI=ON` | docs/build.md, 2026-06-26 |

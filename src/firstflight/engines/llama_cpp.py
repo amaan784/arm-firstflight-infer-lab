@@ -8,6 +8,13 @@ Upstream: https://github.com/ggml-org/llama.cpp (org is `ggml-org`, formerly `gg
 Verified flags (2026-06-26): llama-bench prefill=`-p/--n-prompt`, gen=`-n/--n-gen`,
 JSON output=`-o json`. CPU build: `cmake -B build && cmake --build build --config Release`.
 KleidiAI: add `-DGGML_CPU_KLEIDIAI=ON` (accelerates Q4_0/Q8_0 weights).
+
+One-shot generation goes through `llama-completion`, NOT `llama-cli`. Upstream split the two
+(tools/completion vs tools/cli): `llama-cli` is now an interactive chat REPL that rejects
+`-no-cnv` with "please use llama-completion instead", ignores it, and then — with stdin at
+EOF — reprints its `>` prompt forever instead of exiting. That is a hang, not a slow machine.
+`llama-completion` is also the more portable target: llama.cpp's tools/CMakeLists.txt builds
+it unconditionally while `llama-cli` is built only when LLAMA_BUILD_SERVER is on.
 """
 
 from __future__ import annotations
@@ -20,10 +27,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-# Binary name candidates by role. `llama-cli` is the modern CLI, `main` the legacy name.
+# Binary name candidates by role, in preference order. `llama-completion` is the current
+# one-shot generation tool; `llama-cli` (chat REPL since the tools split) and `main` (the
+# pre-2024 name) are fallbacks for older builds only — see the module docstring for why a
+# modern `llama-cli` must not be picked first.
 # An explicit LLAMA_CPP_BIN dir accepts the legacy names; the bare-PATH search is strict
 # (modern names only) so `main` can't match something like Windows `main.CPL`.
-CLI_NAMES = ["llama-cli", "main", "llama"]
+CLI_NAMES = ["llama-completion", "llama-cli", "main", "llama"]
 BENCH_NAMES = ["llama-bench"]
 SERVER_NAMES = ["llama-server"]
 BATCHED_NAMES = ["llama-batched-bench"]
@@ -36,7 +46,7 @@ KIND_NAMES = {
     "perplexity": PERPLEXITY_NAMES,
 }
 PATH_NAMES = {
-    "cli": ["llama-cli"],
+    "cli": ["llama-completion", "llama-cli"],
     "bench": ["llama-bench"],
     "server": ["llama-server"],
     "batched": ["llama-batched-bench"],
@@ -68,8 +78,10 @@ def find_binary(kind: str = "cli", env_value: str | None = None) -> Path | None:
       2. The local `./engine` dir populated by `firstflight setup-engine`.
       3. PATH.
 
-    `kind` is "cli" (generation), "bench" (llama-bench), or "server" (llama-server).
-    None if not found, so callers can degrade off-Arm / without a build.
+    `kind` is "cli" (generation, i.e. llama-completion), "bench" (llama-bench), or
+    "server" (llama-server). Within a kind, CLI_NAMES order decides which of several
+    present binaries wins. None if not found, so callers can degrade off-Arm / without
+    a build.
     """
     names = KIND_NAMES.get(kind, BENCH_NAMES)
     filenames = _filenames(names)
@@ -121,13 +133,18 @@ def build_run_cmd(
     threads: int | None = None,
     seed: int = 42,
     temp: float | None = None,
+    verbose: bool = False,
 ) -> list[str]:
-    """Single-generation `llama-cli` command (used by the smoke test).
+    """Single-generation `llama-completion` command (used by the smoke test).
 
-    Flags verified against the real b9873 `llama-cli --help` (2026-07-07): `-t/--threads`,
-    `-n/--n-predict`, `-s/--seed`, `-no-cnv/--no-conversation`, `--no-display-prompt`,
-    `--temp`. temp=0.0 is greedy; the quality probe uses it so it measures the model, not
-    the sampler.
+    Flags verified against the real b9873 `llama-completion --help` (2026-08-12):
+    `-t/--threads`, `-n/--n-predict`, `-s/--seed`, `-no-cnv/--no-conversation`,
+    `--no-display-prompt`, `--temp`, `-v/--verbose`. temp=0.0 is greedy; the quality probe
+    uses it so it measures the model, not the sampler.
+
+    `verbose` adds `-v`, which is what makes llama.cpp print its `load_tensors:` lines.
+    Those carry the CPU_KLEIDIAI / CPU_REPACK markers `probe_backend` reads, and
+    llama-completion suppresses them at the default verbosity.
     """
     threads = threads or os.cpu_count() or 4
     cmd = [
@@ -147,6 +164,8 @@ def build_run_cmd(
     ]
     if temp is not None:
         cmd += ["--temp", str(temp)]
+    if verbose:
+        cmd.append("-v")
     return cmd
 
 
@@ -162,6 +181,18 @@ REPACK_MARKER = "CPU_REPACK"
 # type still gets recorded.
 _BUFFER_RE = re.compile(r"load_tensors:\s+(CPU\w*)\s+model buffer size\s*=\s*([\d.]+)\s*MiB")
 _SYSINFO_RE = re.compile(r"system_info:\s*(.+)")
+
+# Buffer types that mean "the weights are in ordinary RAM", not evidence of an accelerated
+# kernel path. CPU_Mapped is the mmap'd weight buffer, printed next to the real one.
+_PLAIN_BUFFERS = {"CPU", "CPU_Mapped"}
+
+
+def _mib(value: str) -> float:
+    """Parse a buffer size for comparison; unparseable sizes sort last, never crash a probe."""
+    try:
+        return float(value)
+    except ValueError:
+        return 0.0
 
 
 @dataclass(frozen=True)
@@ -206,10 +237,20 @@ def probe_backend(
 
     The Arm-leverage claim shouldn't rest on a build flag: this records what the binary
     itself printed (system_info flags + which CPU buffer type the weights loaded into).
+
+    `verbose=True` is load-bearing, not debug noise: llama-completion prints the
+    `load_tensors:` lines that carry those markers only at raised verbosity, so without it
+    every run would silently report KleidiAI inactive.
     """
     try:
         res = run_once(
-            cli_bin, model_path, prompt="hi", n_predict=1, threads=threads, timeout=timeout
+            cli_bin,
+            model_path,
+            prompt="hi",
+            n_predict=1,
+            threads=threads,
+            timeout=timeout,
+            verbose=True,
         )
     except Exception:  # noqa: BLE001 - probing is best-effort
         return BackendProbe(kleidiai=None)
@@ -220,15 +261,14 @@ def probe_backend(
     m = _SYSINFO_RE.search(out)
     system_info = " ".join(m.group(1).split())[:400] if m else ""
 
-    # Prefer the accelerated buffer (anything beyond plain "CPU") if one loaded.
+    # Prefer the accelerated buffer (anything beyond the plain/mmapped weights) if one
+    # loaded, and the largest of its kind: llama.cpp prints a 0.00 MiB placeholder for a
+    # buffer type before the pass that actually fills it, so taking the first match reports
+    # "CPU_KLEIDIAI 0.00 MiB" for a run where KleidiAI held every weight.
     buffers = _BUFFER_RE.findall(out)
-    kernel_buffer = ""
-    for name, mib in buffers:
-        if name != "CPU":
-            kernel_buffer = f"{name} {mib} MiB"
-            break
-    if not kernel_buffer and buffers:
-        kernel_buffer = f"{buffers[0][0]} {buffers[0][1]} MiB"
+    accelerated = [b for b in buffers if b[0] not in _PLAIN_BUFFERS]
+    pick = max(accelerated or buffers, key=lambda b: _mib(b[1]), default=None)
+    kernel_buffer = f"{pick[0]} {pick[1]} MiB" if pick else ""
 
     cpu_features = ""
     try:
@@ -258,6 +298,34 @@ def detect_kleidiai(
     return probe_backend(cli_bin, model_path, threads=threads, timeout=timeout).kleidiai
 
 
+_STALL_HEAD = 400  # chars kept per stream from a timed-out run
+
+
+def _as_text(raw: str | bytes | None) -> str:
+    """TimeoutExpired hands back bytes on POSIX even under text=True."""
+    if raw is None:
+        return ""
+    return raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+
+
+def _stall_output(exc: subprocess.TimeoutExpired) -> str:
+    """What the process printed before it stalled, as a suffix for the error string.
+
+    The head, not the tail: a binary that refuses a flag says so on its first line and can
+    then print for as long as you let it (a chat REPL at EOF reprints its prompt forever,
+    which is megabytes by the time the timeout fires). The tail of that is just noise.
+    """
+    parts = [
+        f"{label} before the stall: {text[:_STALL_HEAD]}"
+        for label, text in (
+            ("stdout", _as_text(exc.stdout).strip()),
+            ("stderr", _as_text(exc.stderr).strip()),
+        )
+        if text
+    ]
+    return ("\n" + "\n".join(parts)) if parts else ""
+
+
 def run_once(
     cli_bin: Path,
     model_path: Path,
@@ -267,13 +335,14 @@ def run_once(
     seed: int = 42,
     temp: float | None = None,
     timeout: float = 300.0,
+    verbose: bool = False,
 ) -> RunResult:
     """Run one generation, capture output + wall time (smoke test).
 
-    stdin is DEVNULL so llama-cli can't wait for interactive input: on the real b9873
+    stdin is DEVNULL so the engine can't wait for interactive input: on the real b9873
     Windows binary an inherited console stdin hangs the run.
     """
-    cmd = build_run_cmd(cli_bin, model_path, prompt, n_predict, threads, seed, temp)
+    cmd = build_run_cmd(cli_bin, model_path, prompt, n_predict, threads, seed, temp, verbose)
     start = time.perf_counter()
     try:
         proc = subprocess.run(
@@ -284,13 +353,18 @@ def run_once(
             check=False,
             stdin=subprocess.DEVNULL,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         # A hung generation becomes a failed RunResult. Every caller already handles the
         # non-ok path (smoke prints the error, probe scores the item wrong, detect -> None).
+        #
+        # Keep what the process printed before it stalled. A hang is nearly always
+        # explained by that output (a rejected flag, a wait for input), and throwing it
+        # away is how "llama-cli timed out after 180s" became the whole diagnosis for a
+        # binary that had printed its own reason on line one.
         return RunResult(
             returncode=-1,
             stdout="",
-            stderr=f"llama-cli timed out after {timeout:.0f}s",
+            stderr=f"{cli_bin.name} timed out after {timeout:.0f}s{_stall_output(exc)}",
             wall_s=time.perf_counter() - start,
             cmd=cmd,
         )

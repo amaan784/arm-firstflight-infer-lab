@@ -24,7 +24,7 @@ from ..util import bytes_human, console, engine_dir, machine, platform_system
 
 # Pinned tag. Tags float, so bump this on purpose. Keep in sync with arm-bench.yml/Dockerfile.
 # b9873 (2026-07-04) verified live 2026-07-05: every ASSET_PATTERNS entry below exists on this
-# release, and the win-cpu-x64 zip ships llama-cli.exe / llama-bench.exe at the archive root.
+# release, and the win-cpu-x64 zip ships the tool .exe binaries at the archive root.
 DEFAULT_TAG = "b9873"
 
 # (system, arch) -> asset filename pattern. {tag} is substituted.
@@ -88,7 +88,7 @@ def setup_engine(
 ) -> Path:
     """Download + extract the prebuilt llama.cpp for this platform. Returns the engine dir.
 
-    Idempotent: an existing llama-cli/llama-bench under dest is reused unless `force`.
+    Idempotent: an existing llama-completion/llama-bench under dest is reused unless `force`.
     Raises EngineFetchError on unsupported platforms or download failures.
     """
     from . import llama_cpp  # local import to avoid a cycle at module load
@@ -133,6 +133,8 @@ def setup_engine(
     found = llama_cpp.find_binary("cli", env_value=str(dest))
     bench = llama_cpp.find_binary("bench", env_value=str(dest))
     if not found and not bench:
-        raise EngineFetchError(f"extracted {asset} but found no llama-cli/llama-bench under {dest}")
+        raise EngineFetchError(
+            f"extracted {asset} but found no llama-completion/llama-bench under {dest}"
+        )
     console.print(f"[green]OK[/] engine ready: {found or bench}")
     return dest

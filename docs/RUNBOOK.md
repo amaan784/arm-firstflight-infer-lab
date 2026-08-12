@@ -187,4 +187,5 @@ its output alongside the results JSON to document the run's environment.
 | Model download slow/interrupted | Re-run; downloads are atomic (`.part` then rename), cached in `models/` |
 | PowerShell won't run `activate` | `Set-ExecutionPolicy -Scope Process Bypass`, or call `.\.venv\Scripts\<tool>.exe` directly |
 | Tests can't find modules | You're outside the venv; reactivate or use the venv's `python -m pytest` |
-| Old llama.cpp build hangs on generation | Fixed in the harness (stdin closed); if driving llama-cli manually, redirect stdin from null |
+| Old llama.cpp build hangs on generation | Fixed in the harness (stdin closed); if driving the engine manually, redirect stdin from null |
+| `llama-cli` hangs until the timeout, printing `>` forever | You're on a build where `llama-cli` is the chat REPL: it rejects `-no-cnv` ("please use llama-completion instead") and never exits at EOF. Use `llama-completion` — the harness prefers it automatically; only an explicit `LLAMA_CPP_BIN` pointing straight at `llama-cli` overrides that |

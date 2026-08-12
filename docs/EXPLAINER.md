@@ -120,7 +120,8 @@ verified against Arm's own SME2 device list and AWS's Graviton feature table, 20
 - **llama.cpp**: the standard open-source C++ engine for running LLMs on CPUs. We drive it,
   never fork it.
 - **GGUF**: its model file format (all the weights plus metadata in one file you download).
-- **llama-cli**: its generate-text binary (our smoke test and quality probe use it).
+- **llama-completion**: its generate-text binary (our smoke test and quality probe use it).
+  Upstream split this out of `llama-cli`, which is now an interactive chat REPL.
 - **llama-bench**: its built-in benchmarker. Give it `-p` (prefill sizes) and `-n`
   (generation sizes) and it outputs timing rows; `-o json` makes them machine-readable.
   We parse `avg_ts` (mean tokens/sec) and `stddev_ts` (spread across repeats) from it.
@@ -190,7 +191,7 @@ non-Arm machines it skips without error.
 
 ### The quality guardrail
 A speedup that breaks the model is worthless, and quantization can degrade answers. After
-every experiment config we run a small **exact-match probe** (fixed Q&A through llama-cli:
+every experiment config we run a small **exact-match probe** (fixed Q&A through llama-completion:
 "What is 5 multiplied by 6?" must contain "30" as a whole word) and print accuracy next to the speed. It is
 a coarse regression check, not a benchmark of model quality; the report shows correct/total per config ("32/40 → 32/40").
 
@@ -296,7 +297,7 @@ Design rules that shaped the code:
 | **Memory-bandwidth-bound** | Limited by how fast data arrives from RAM |
 | **llama.cpp** | The standard C++ engine for LLM inference on CPUs |
 | **GGUF** | llama.cpp's single-file model format |
-| **llama-bench / llama-cli** | llama.cpp's benchmarker / text-generation binary |
+| **llama-bench / llama-completion** | llama.cpp's benchmarker / text-generation binary |
 | **Quantization** | Storing weights in fewer bits (3.14159 → 3.14): smaller, faster, small error |
 | **Q4_0 / Q8_0** | Simple 4-bit / 8-bit quant formats; the ones KleidiAI accelerates |
 | **Q4_K_M** | Smarter 4-bit "k-quant"; common default; not KleidiAI-accelerated |

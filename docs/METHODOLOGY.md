@@ -90,7 +90,7 @@ thousands of tokens to dozens, and `prompt_ms` with it. Both turns are reported 
 - **Noise floor (`noise-floor` experiment).** The same build measured twice under two labels.
   Its apparent "speedup" is pure runner noise (co-tenancy, thermals) and is published next to
   the headline as the yardstick a real delta must clear.
-- **Fixed seed.** llama-cli paths (smoke, quality probe) pin seed 42 + greedy decoding;
+- **Fixed seed.** llama-completion paths (smoke, quality probe) pin seed 42 + greedy decoding;
   llama-bench itself takes no seed flag (its measurement is timing, not sampling).
 - **Pinned environment.** llama.cpp pinned to a specific `b####` release tag; deps pinned in
   `pyproject.toml`; reproducible image in `docker/Dockerfile.arm64`. Our pin (b9873) is newer
@@ -139,7 +139,7 @@ points two configs at two llama.cpp builds via `bin: ${LLAMA_BASELINE_BIN}` /
 Every speed result is paired with a quality delta to check that the speedup did not cost
 accuracy. Two paths:
 
-- **Built-in probe (default):** a small fixed exact-match Q&A set run through `llama-cli`:
+- **Built-in probe (default):** a small fixed exact-match Q&A set run through `llama-completion`:
   self-contained, no torch, runs on the bench box. A regression guardrail, not a leaderboard.
   Scoring matches whole words in the first line of the completion only (a rambling model
   must not get extra chances to hit the gold string). Limits: at n=40 the 95% binomial

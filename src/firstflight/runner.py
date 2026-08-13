@@ -673,20 +673,23 @@ def _experiment_round(spec, models, wl, *, quality: bool, download: bool, qmod) 
             else:
                 console.print("  [dim]quality skipped: no llama-completion binary[/]")
 
-            # Perplexity: the finer instrument (the probe can't resolve ~1% shifts).
-            # Best-effort: a missing binary or parse failure never sinks the experiment.
-            from .eval import perplexity as pmod
+        # Perplexity: the finer instrument (the probe can't resolve ~1% shifts), and the only
+        # numerics check worth anything on the attribution ladder, where every rung loads the
+        # same GGUF and only the kernels differ. Outside `if quality:` on purpose, so
+        # --no-quality drops the coarse 40-item probe and keeps this.
+        # Best-effort: a missing binary or parse failure never sinks the experiment.
+        from .eval import perplexity as pmod
 
-            ppl_bin = llama_cpp.find_binary("perplexity", env_value=cfg.bin or None)
-            if ppl_bin is not None:
-                try:
-                    corpus = pmod.ensure_default_corpus(model_dir())
-                    if corpus is not None:
-                        pr = pmod.run_perplexity(ppl_bin, model_path, corpus, threads=cfg.threads)
-                        sweep.quality = {**(sweep.quality or {}), "ppl": pr.ppl}
-                        console.print(f"  perplexity: {pr.ppl:.2f} ({pr.corpus})")
-                except pmod.PerplexityError as exc:
-                    console.print(f"  [dim]perplexity skipped: {safe(str(exc)[:160])}[/]")
+        ppl_bin = llama_cpp.find_binary("perplexity", env_value=cfg.bin or None)
+        if ppl_bin is not None:
+            try:
+                corpus = pmod.ensure_default_corpus(model_dir())
+                if corpus is not None:
+                    pr = pmod.run_perplexity(ppl_bin, model_path, corpus, threads=cfg.threads)
+                    sweep.quality = {**(sweep.quality or {}), "ppl": pr.ppl}
+                    console.print(f"  perplexity: {pr.ppl:.2f} ({pr.corpus})")
+            except pmod.PerplexityError as exc:
+                console.print(f"  [dim]perplexity skipped: {safe(str(exc)[:160])}[/]")
 
         out = results_dir() / result_filename(model_id, cfg.variant, cfg.label, sweep.timestamp)
         sweep.save_json(out)

@@ -260,11 +260,13 @@ def run_sweep(
     cache_type_v: str = "",
     ubatch_size: int | None = None,
     flash_attn: str = "",
-    # 30 min per sweep. Generous for any healthy config, and short enough that one pathological
-    # rung cannot eat the whole job: at 2h a single stuck sweep consumed the entire CI budget
-    # and the remaining rungs never ran (observed 2026-08-12). A skipped config costs one row;
-    # a burnt budget costs the run.
-    timeout: float = 1800.0,
+    # 45 min per sweep. Sized against the slowest legitimate config, not the fastest: the
+    # generic armv8-a rung runs at ~18 tok/s (measured 2026-08-12), llama-bench warms up before
+    # each measured run, so a 4-point sweep is ~2x15,360 prefill tokens ~= 1,700s before model
+    # load and --delay. A 30-min cap left ~90s of headroom and would have cut the floor rung,
+    # which is the one rung the ladder cannot attribute anything without. Still far inside the
+    # 300-min job cap, so a genuinely stuck sweep costs one row rather than the run.
+    timeout: float = 2700.0,
     # --prio is NOT defaulted on: raising scheduler priority needs privileges the process
     # usually lacks in a container, and llama-bench treats the refusal as fatal
     # ("failed to set process priority ... Inappropriate ioctl for device"). Pass prio=2

@@ -220,7 +220,7 @@ including judges, reproduce the numbers at zero cost:
 - `kleidiai-before-after` (one dispatch): builds llama.cpp three ways (a generic
   armv8-a floor with `GGML_NATIVE=OFF` and `GGML_CPU_REPACK=OFF`, the native+repack default,
   and the KleidiAI build) and runs the full evidence suite on the same Q4_0 model: the
-  attribution ladder (3 interleaved rounds, up to 16k context) with active-detection +
+  attribution ladder (interleaved rounds, up to 8k context) with active-detection +
   quality guardrail + perplexity, the same-build noise-floor control, the
   Q8_0/Q4_K_M/Q4_0 quant sweep, the KV-cache and ubatch experiments, the build-flags
   comparison, the measured-TTFT prompt-cache demo, and the concurrency sweep.

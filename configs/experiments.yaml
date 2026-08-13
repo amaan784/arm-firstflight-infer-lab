@@ -146,8 +146,11 @@ experiments:
 
   noise-floor:
     description: "Same build, same config, run twice (ctrl-a vs ctrl-b) — the measurement noise yardstick."
-    model: qwen2.5-0.5b-instruct
-    workload: rag-context
+    # Same model and same context points as the ladder it calibrates. A noise floor measured
+    # in a different regime (smaller model, shorter prompts) would not bound the ladder's
+    # error, and it would be slower besides: `long-context` runs one repeat per sweep.
+    model: qwen2.5-1.5b-instruct
+    workload: long-context
     configs:
       # Two identical configs. Any 'speedup' between them is runner noise (co-tenancy,
       # thermal, cache state), so this spread is the floor a real delta must clear to

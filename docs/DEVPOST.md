@@ -61,7 +61,7 @@ context. TTFT ⟨A⟩s → ⟨B⟩s on ⟨instance/runner⟩; quality held (prob
 perplexity ⟨P1⟩ → ⟨P2⟩). Measured up the attribution ladder: generic armv8-a →
 ggml's aarch64 repack → KleidiAI.
 
-> **Fill-in note (don't paste this):** the free-runner CI ladder measures up to 16k tokens
+> **Fill-in note (don't paste this):** the free-runner CI ladder measures up to 8k tokens
 > at $0/hr; use those numbers as-is ("on a free `ubuntu-24.04-arm` runner, Azure Cobalt
 > 100"). Only claim 32k context or $/M-token dollar figures if you ran Path B on a
 > paid instance (e.g. c8g.2xlarge), because judges can check the reproduction path.
@@ -116,7 +116,7 @@ env):
 ```bash
 pip install -e ".[report,dev]"
 firstflight setup-engine     # downloads the prebuilt llama.cpp for YOUR platform
-firstflight smoke            # real model download + one real generation; `pytest` = 107 tests
+firstflight smoke            # real model download + one real generation; `pytest` = 119 tests
 ```
 
 **Path A, Arm64 in the cloud at zero cost (the judge path):** the repo's `arm-bench`

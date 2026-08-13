@@ -28,9 +28,18 @@ workloads:
 
   long-context:
     description: "Long-context ladder for the headline experiment — where prefill actually hurts."
-    # 16k is the largest point that fits a shared 4-vCPU CI runner in reasonable wall-clock;
-    # the full 128..32768 curve comes from `make bench` (prefill-scaling) on a real Arm box.
-    prompt_lengths: [2048, 8192, 16384]
+    # Four points so the scaling shape is visible, not just two endpoints: prefill grows
+    # superlinearly with context (attention is quadratic), and a curve is the argument.
+    # The short points are nearly free; 8192 dominates the cost. 8k is the ceiling that fits
+    # a shared 4-vCPU runner: measured 2026-08-12, the generic armv8-a rung runs at ~18 tok/s
+    # prefill (that slowness IS the measurement), so a 16k point cost that rung two hours by
+    # itself. The full 128..32768 curve comes from `make bench` (prefill-scaling) on a
+    # dedicated Arm box, where the floor build is not sharing four cores with a CI agent.
+    prompt_lengths: [1024, 2048, 4096, 8192]
     gen_lengths: [32]
-    repeats: 3
+    # One repeat per sweep, on purpose. This workload is always run with `--rounds N`, and
+    # rounds are the better error bar: repeats inside one llama-bench process share cache and
+    # allocator state, while rounds re-measure minutes apart and so capture the drift that
+    # actually moves numbers on a shared runner. Multiplying the two only costs wall-clock.
+    repeats: 1
     warmup: 1

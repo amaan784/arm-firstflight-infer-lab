@@ -260,7 +260,11 @@ def run_sweep(
     cache_type_v: str = "",
     ubatch_size: int | None = None,
     flash_attn: str = "",
-    timeout: float = 7200.0,
+    # 30 min per sweep. Generous for any healthy config, and short enough that one pathological
+    # rung cannot eat the whole job: at 2h a single stuck sweep consumed the entire CI budget
+    # and the remaining rungs never ran (observed 2026-08-12). A skipped config costs one row;
+    # a burnt budget costs the run.
+    timeout: float = 1800.0,
     # --prio is NOT defaulted on: raising scheduler priority needs privileges the process
     # usually lacks in a container, and llama-bench treats the refusal as fatal
     # ("failed to set process priority ... Inappropriate ioctl for device"). Pass prio=2

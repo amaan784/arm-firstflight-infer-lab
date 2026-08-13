@@ -86,7 +86,10 @@ thousands of tokens to dozens, and `prompt_ms` with it. Both turns are reported 
   share cache/allocator state and can't see slow drift. Rounds re-run the whole config list
   round-robin (A,B,C,A,B,C,...); the report takes the median per rung and shows the
   between-round spread, which is the error bar that matters on a shared runner. CI runs the
-  headline ladder with 3 rounds.
+  headline ladder with 3 rounds. The `long-context` workload therefore sets `repeats: 1`:
+  rounds supply the variance, and multiplying rounds by repeats would only buy wall-clock.
+  The `noise-floor` control runs the same model and context points as the ladder, so its
+  spread bounds the ladder's error rather than some cheaper regime's.
 - **Noise floor (`noise-floor` experiment).** The same build measured twice under two labels.
   Its apparent "speedup" is pure runner noise (co-tenancy, thermals) and is published next to
   the headline as the yardstick a real delta must clear.

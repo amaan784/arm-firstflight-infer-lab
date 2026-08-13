@@ -26,8 +26,8 @@ on:
         default: true
         type: boolean
       rounds:
-        description: "Interleaved rounds for the KleidiAI ladder (1 = fast calibration run)"
-        default: "3"
+        description: "Interleaved rounds for the KleidiAI ladder (1 = fastest; 2 = default, gives a spread)"
+        default: "2"
         type: string
   push:
     branches: [main]
@@ -261,7 +261,13 @@ jobs:
           LLAMA_KLEIDIAI_BIN: ${{ github.workspace }}/llama-kleidiai/build
         # Interleaved rounds (A,B,C,A,B,C,...) so runner drift can't masquerade as a
         # treatment effect; the report medians per rung and shows the between-round spread.
-        run: firstflight experiment --name kleidiai --no-report --rounds "${{ github.event.inputs.rounds || '3' }}"
+        #
+        # --no-quality here, deliberately. All three rungs load the IDENTICAL GGUF, so the only
+        # thing a quality check can detect is whether the swapped kernels changed the numerics.
+        # Perplexity (which runs regardless of this flag) is the sensitive instrument for that;
+        # the 40-item probe is the coarse one, and it reloads the model 40 times per rung. The
+        # probe stays on the quant sweep, where the weights genuinely differ.
+        run: firstflight experiment --name kleidiai --no-report --no-quality --rounds "${{ github.event.inputs.rounds || '2' }}"
 
       # ttft + throughput run EARLY (right after the ladder): they are unique evidence with
       # no fallback, so an overtime cancel must lose the secondary sweeps below, not these.

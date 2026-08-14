@@ -1,77 +1,115 @@
-# Demo Script (~2:40)
+# Demo video script
 
-The video makes one argument rather than touring features: the standard KleidiAI benchmark is
-measured against the wrong baseline, and this harness catches it (including catching itself).
+Target 2:45, hard cap 3:00. Read it straight through. The bracketed lines are screen cues,
+not spoken.
 
-Record the terminal beats in advance (asciinema + agg, or VHS) so playback is instant and
-typo-free. Beats 4 and 5 are the point of the video; everything else is setup.
+Have these open before you record:
 
-**Rules constraints (from the official rules):** host publicly on YouTube, Vimeo or Youku; keep
-under 3:00 (judges are not required to watch beyond three minutes); include footage of the
-project running on the Arm64 environment it targets (terminal on the Arm runner and the Actions
-run summary both count); no third-party trademarks or copyrighted music.
-
-> Script every number against the real downloaded results, never a live run. Nothing in this
-> video should be measured on camera.
+1. `README.md` on GitHub, scrolled to the top
+2. `bench/reports/report-20260814-193627.html` (the Q4_0 report)
+3. The green run: https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31784946201
 
 ---
 
-**[0:00–0:20] The claim everybody makes.**
-> "If you search how to speed up llama.cpp on Arm, you get one answer: rebuild it with KleidiAI
-> and measure before and after. So that's what I did, and I got a number. Then I checked what
-> that 'before' build was."
+**[README, top of the page]**
 
-**[0:20–0:45] The problem, on screen.**
-> Show `ggml/CMakeLists.txt` with the two default lines visible.
-> "A stock llama.cpp Release build already has `GGML_NATIVE` on (native targeting) and
-> `GGML_CPU_REPACK` on, which is ggml's own Arm kernel doing the same repacking trick KleidiAI
-> does. The standard test compares Arm-optimized against Arm-optimized, then credits the whole
-> difference to KleidiAI."
+This is Arm FirstFlight.
 
-**[0:45–1:20] The fix: build the real floor.**
-> Show the three build steps in `arm-bench.yml`, then the ladder running.
-> "So FirstFlight builds the floor that nobody builds: native off, repack off, plain armv8-a.
-> Then three rungs on the same runner, same model: generic, plus ggml's repack, plus KleidiAI.
-> Now every step has a name."
-> Cut to the report's ladder section with the real per-rung numbers.
+I want to show you something about KleidiAI benchmarks that I think is wrong.
 
-**[1:20–1:50] Proof the kernels ran.**
-> Show the kernel-evidence block in the report.
-> "It doesn't take the build flag's word for it. This comes out of the model-load log: which
-> weight buffer loaded, and which instruction tier ran. i8mm here, on Neoverse N2."
+Here's how everyone measures it. You build llama.cpp normally. You build it again with
+KleidiAI switched on. You compare the two, and you publish the number.
 
-**[1:50–2:20] The harness catching a lie.**
-> Show the negative-control experiment and the report row.
-> "Here's the same KleidiAI build pointed at a Q4_K_M model, the quant most people download,
-> and one KleidiAI has no kernels for. It gets faster. And the harness refuses to credit
-> KleidiAI, because the probe says the kernels never engaged."
-> Then the noise gate, on screen:
-> "Same thing here. This delta didn't clear the measured noise floor, so instead of a
-> multiplier it prints 'within noise' and doesn't claim the win. A benchmark that can't say
-> *no* isn't measuring anything."
+The problem is that first build.
 
-**[2:20–2:40] What you get, and close.**
-> Show the run summary in GitHub Actions.
-> "One click, a free Arm runner, zero dollars: the full report lands in the run summary.
-> Fork the template, point it at your model, get your own defensible number.
-> Open source, MIT. That's Arm FirstFlight."
+In llama.cpp's own CMake file, two flags default to on. Native targeting, and ggml's own
+Arm repack kernels. So your "before" build is already Arm-optimized. You're comparing one
+Arm optimization against another, and handing KleidiAI the credit for both.
+
+**[scroll to the ladder diagram]**
+
+So we built the baseline nobody builds. Native off. Plain armv8-a. Repack off.
+
+Then three rungs. Same model, same machine, same run. Generic, then repack, then KleidiAI.
+Each one has to earn its own number.
+
+We also ran the identical build twice under two different labels, just to see how much the
+machine wobbles on its own. That's our noise floor. Nought point three percent.
+
+**[scroll to the Q4_0 ladder table]**
+
+Here's Q4_0.
+
+Repack takes prefill from twenty-six tokens a second to ninety-five. Three point six times
+faster.
+
+Then KleidiAI, on top of that. One point zero zero. Nothing.
+
+And that is not a broken test.
+
+**[scroll to the kernel evidence table]**
+
+Look at the load log. Three different weight buffers, three different kernel tiers.
+KleidiAI loaded. It just had nothing left to take, because repack got there first.
+
+The standard benchmark would have reported that entire three point six as a KleidiAI win.
+
+**[scroll to the Q8_0 table]**
+
+Now, ggml's repack is built for Q4_0. So we predicted KleidiAI would have room at Q8_0
+instead. We wrote that down first, then we ran it.
+
+One point two three at two thousand tokens. One point one three at four thousand. One point
+one five on generation.
+
+And at Q8_0, the KleidiAI build reports repack off, KleidiAI on. That's a different code
+path, not more of the same one.
+
+So the usual benchmark is wrong in both directions. It gives KleidiAI credit it didn't earn
+at Q4_0, and it never tests the quant where it actually does.
+
+**[scroll to the perplexity column]**
+
+One more thing, and this is the part I care about most.
+
+At Q4_0, repack and KleidiAI gave identical perplexity. Same number, six digits.
+
+At Q8_0, KleidiAI shifts it by one point four percent.
+
+So that twenty-three percent speedup isn't free. A benchmark that only measures speed would
+ship that without ever noticing. Ours caught it.
+
+**[the green Actions run, then the Run workflow dialog]**
+
+All of this runs on a free GitHub Arm runner. One click, no hardware. It builds llama.cpp
+three ways, runs the ladder, and writes the report straight into the run summary.
+
+**[the report headline]**
+
+That's Arm FirstFlight. It builds the real baseline, splits the win by mechanism, proves the
+kernels actually ran, and refuses to claim anything inside its own noise.
+
+Even when the honest answer is that nothing happened.
 
 ---
 
-## Shot list
+## Numbers to get right
 
-| # | Beat | Source |
-|---|---|---|
-| 1 | The standard benchmark claim | slide or terminal |
-| 2 | `GGML_NATIVE` / `GGML_CPU_REPACK` defaults | `ggml/CMakeLists.txt` |
-| 3 | Three builds + the ladder | `.github/workflows/arm-bench.yml`, report ladder section |
-| 4 | Kernel evidence (buffer + ISA tier) | report "Kernel evidence" section |
-| 5 | Q4_K_M negative control: KleidiAI INACTIVE | report row, `kleidiai-null-control` |
-| 6 | Noise gate: "within noise, not claimed" | report headline |
-| 7 | Run summary on `ubuntu-24.04-arm` | GitHub Actions run page |
+| claim | value |
+|---|---|
+| repack vs generic, Q4_0 @ 1k | 26.4 -> 94.8 tok/s, 3.60x |
+| KleidiAI vs repack, Q4_0 | 1.00-1.01x at every context |
+| noise floor | 0.3% |
+| KleidiAI vs repack, Q8_0 @ 2k | 1.23x |
+| KleidiAI vs repack, Q8_0 @ 4k | 1.13x |
+| KleidiAI vs repack, Q8_0 generation | 1.15x (39.2 -> 45.2 tok/s) |
+| perplexity, Q4_0 repack vs kleidiai | 37.4181 both |
+| perplexity, Q8_0 repack vs kleidiai | 31.6267 -> 32.0774 (+1.4%) |
 
-## Not in the video
+## Do not say
 
-`ttft`, `throughput`, `profile`, `autotune`, `perplexity` and the quant/KV/micro-batch sweeps
-are all real and documented, but none of them belong here. Showing them would turn the video
-into a feature tour. The video makes one claim and proves it.
+- Don't call the Q4_0 result a failure. It's a measured null with the kernels proven active.
+- Don't quote a dollar figure. Both runs are on a free runner priced at $0/hr.
+- Don't claim a Q8_0 noise floor. That run skipped it. If you need to qualify the 1.23x, say
+  "far outside the nought point three percent floor we measured at Q4_0".
+- Don't say 32k context. The runs cover 1k to 8k.

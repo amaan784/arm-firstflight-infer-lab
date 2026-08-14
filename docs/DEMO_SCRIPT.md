@@ -22,19 +22,19 @@ KleidiAI on, compare, publish the number.
 
 The problem is that first build.
 
-In llama.cpp's own CMake file, two flags default to on. Native targeting, and ggml's own
-Arm repack kernels. So your "before" build is already Arm-optimized. You're comparing one
-Arm optimization against another, and handing KleidiAI credit for both.
+In llama.cpp's own CMake file, two flags default to on: native targeting, and ggml's own Arm
+repack kernels. So your "before" build is already Arm-optimized. You're comparing one Arm
+optimization against another, and handing KleidiAI credit for both.
 
 **[scroll to the ladder diagram]**
 
 So we built the baseline nobody builds. Native off. Plain armv8-a. Repack off.
 
-Then three rungs. Same model, same machine, same run. Generic, then repack, then KleidiAI.
-Each one has to earn its own number.
+Then three rungs. Same model, same machine, same run. Generic, repack, KleidiAI. Each has to
+earn its own number.
 
-We also ran the identical build twice under two labels, to see how much the machine wobbles
-on its own. That's our noise floor. Zero point three percent.
+We also ran the identical build twice, to see how much the machine wobbles on its own.
+That's our noise floor. Zero point three percent.
 
 **[scroll to the Q4_0 ladder table]**
 
@@ -44,8 +44,6 @@ Repack takes prefill from twenty-six tokens a second to ninety-five. Three point
 faster.
 
 Then KleidiAI, on top of that. One point zero zero. Nothing.
-
-And that is not a broken test.
 
 **[scroll to the kernel evidence table]**
 
@@ -64,32 +62,37 @@ We wrote that down first, then ran it.
 One point two three at two thousand tokens. One point one three at four thousand. One point
 one five on generation.
 
-And at Q8_0, the KleidiAI build reports repack off, KleidiAI on. That's a different code
-path, not more of the same one.
+And at Q8_0 the KleidiAI build reports repack off, KleidiAI on. A different code path, not
+more of the same one.
 
 So the usual benchmark is wrong in both directions. It gives KleidiAI credit it didn't earn
-at Q4_0, and it never tests the quant where it actually does.
+at Q4_0, and never tests the quant where it does.
 
 **[scroll to the perplexity column]**
 
-One more thing, and this is the part I care about most.
+One more thing.
 
 At Q4_0, repack and KleidiAI gave identical perplexity. Same number, six digits.
 
 At Q8_0, KleidiAI shifts it by one point four percent.
 
-So that twenty-three percent speedup isn't free. A benchmark that only measures speed would
-ship that without ever noticing. Ours caught it.
+So that twenty-three percent speedup isn't free. A speed-only benchmark ships that without
+noticing. Ours caught it.
 
 **[the green Actions run, then the Run workflow dialog]**
 
 All of this runs on a free GitHub Arm runner. One click, no hardware. It builds llama.cpp
-three ways, runs the ladder, and writes the report straight into the run summary.
+three ways and writes the report into the run summary.
+
+**[open a running or completed job's live log and scroll the benchmark step for ~10 seconds -
+this is the required "project functioning on Arm" footage, so let it breathe]**
+
+That's it executing on `ubuntu-24.04-arm`.
 
 **[the report headline]**
 
-That's Arm FirstFlight. It builds the real baseline, splits the win by mechanism, proves the
-kernels actually ran, and refuses to claim anything inside its own noise.
+That's Arm FirstFlight. It builds the real baseline, splits the win by mechanism, and refuses
+to claim anything inside its own noise.
 
 Even when the honest answer is that nothing happened.
 

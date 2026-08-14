@@ -5,14 +5,13 @@
 > submitting; everything else is ready to paste.
 
 ## Project name
-**Arm FirstFlight — Inference Optimization Lab**
+**Arm FirstFlight Attribution Ladder**
 
 ## Elevator pitch (tagline)
-Your KleidiAI speedup is measured against the wrong baseline: a stock llama.cpp build is
-already Arm-accelerated. FirstFlight builds the real floor, splits the win by mechanism, and
-refuses to claim what it can't prove.
+Every KleidiAI benchmark I found compares against a build that's already Arm-optimized. So I
+built the real baseline. At Q4_0 KleidiAI adds nothing. At Q8_0 it's worth 1.23x.
 
-## Why FirstFlight
+## Project overview: why FirstFlight exists
 
 Nearly every "we enabled KleidiAI and got N×" result (including ones I set out to reproduce)
 compares against a baseline that is already accelerated. In llama.cpp's own
@@ -43,7 +42,7 @@ almost entirely prefill. Meanwhile more and more inference runs on Arm cloud CPU
 Axion, Cobalt) because they are cheap per token. We wanted to measure how much faster and
 cheaper Arm-specific optimization makes this workload, and whether it costs any accuracy.
 
-## What it does
+## What it does: functionality and final output
 `firstflight` is a pip-installable harness for quantized CPU inference on standard CPU-only
 Arm64 cloud instances. It:
 - **Measures** prefill/TTFT scaling across context lengths (1k → 8k tokens on the free
@@ -116,6 +115,14 @@ weighed against the 0.3% floor measured at Q4_0, and its perplexity is one measu
 rung with no error bar. The Q4_K_M negative control and the quant/KV-cache/micro-batch sweeps
 are implemented but gated: they add ~11h, past the CI job's 300-minute timeout. Everything
 claimed above was measured in the linked runs; nothing was extrapolated.
+
+**What the final output is.** Not an optimized model. The deliverable is three things: a
+reproducible measurement harness (`pip install -e .`, one CI click, no Arm hardware needed); a
+standalone HTML + Markdown + JSON report per run, committed alongside the raw results; and the
+finding itself, which is that ggml's repack delivers 3.60x at Q4_0 while KleidiAI adds 1.00x,
+and KleidiAI delivers 1.23x at Q8_0 where repack cannot reach. Anyone benchmarking llama.cpp
+on Arm can rerun the ladder against their own model and get an attribution, not a single
+unexplained multiplier.
 
 Full report, raw result JSONs and the CI run are linked below; every number here re-renders
 from committed data with one command.

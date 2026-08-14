@@ -9,7 +9,7 @@ description = "Reproducible benchmark + optimization harness for CPU LLM inferen
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-authors = [{ name = "Arm FirstFlight Infer Lab authors" }]
+authors = [{ name = "Arm FirstFlight authors" }]
 keywords = ["arm", "neoverse", "llama.cpp", "kleidiai", "llm", "inference", "benchmark", "ttft", "prefill"]
 classifiers = [
     "Development Status :: 3 - Alpha",

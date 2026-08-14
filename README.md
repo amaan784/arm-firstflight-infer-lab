@@ -1,4 +1,6 @@
-# Arm FirstFlight: Inference Optimization Lab
+# Arm FirstFlight Attribution Ladder
+
+**Which Arm optimization actually earned your speedup - measured, not assumed.**
 
 > ### Your KleidiAI speedup is measured against the wrong baseline.
 >
@@ -7,16 +9,28 @@
 > KleidiAI with work ggml's own aarch64 kernels were already doing. And on Q4_K_M, the quant
 > most people download, KleidiAI's kernels never engage at all.
 >
-> FirstFlight builds that floor and splits the speedup by mechanism. Measured on a free Arm
-> runner: **ggml's repack delivers 3.60x, and KleidiAI adds 1.00x on top of it at Q4_0 and
-> 1.23x at Q8_0.** The prediction that Q8_0 was where KleidiAI had room was written down
-> before the run. Full ladders, noise floor and kernel evidence below.
+> So I built the baseline nobody builds, and measured each mechanism on its own rung. On a
+> free Arm runner: **ggml's repack does the work at Q4_0 - 3.60x - and KleidiAI adds 1.00x on
+> top of it. At Q8_0, where repack can't reach, KleidiAI earns 1.23x.** That Q8_0 prediction
+> was written down before the run. Ladders, noise floor and kernel evidence below.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/ci.yml)
 [![arm-bench](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/arm-bench.yml/badge.svg)](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/arm-bench.yml)
 
 Built for the **Arm Create: AI Optimization Challenge (Cloud AI track)**.
+
+**Read the measured results:**
+[Q4_0 report](bench/reports/report-20260814-215555.md) ·
+[Q8_0 report](bench/reports/report-20260814-215557.md) ·
+[raw result JSONs](bench/results/) ·
+[the CI runs that produced them](https://github.com/amaan784/arm-firstflight-infer-lab/actions)
+
+Those `.md` reports render here on GitHub. Each also has a **standalone one-file HTML twin**
+next to it (`bench/reports/*.html`, charts embedded, no assets needed) which GitHub shows as
+source rather than rendering, so download it or read the same report in the
+[Actions run summary](https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31784946201),
+where CI publishes it directly.
 
 ---
 

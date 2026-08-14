@@ -9,6 +9,10 @@
 *.yaml text eol=lf
 *.py text eol=lf
 
+# Generated reports are output, not source. Without this the committed standalone HTML
+# twins (~670 KB) outweigh the Python (~286 KB) and GitHub badges this as an HTML project.
+bench/reports/*.html linguist-documentation
+
 # Binary assets.
 *.png binary
 *.gguf binary

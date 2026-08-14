@@ -7,8 +7,10 @@
 > KleidiAI with work ggml's own aarch64 kernels were already doing. And on Q4_K_M, the quant
 > most people download, KleidiAI's kernels never engage at all.
 >
-> FirstFlight builds the real floor, splits the speedup by mechanism, proves the kernels ran,
-> and refuses to report a win it can't defend.
+> FirstFlight builds that floor and splits the speedup by mechanism. Measured on a free Arm
+> runner: **ggml's repack delivers 3.60x, and KleidiAI adds 1.00x on top of it at Q4_0 and
+> 1.23x at Q8_0.** The prediction that Q8_0 was where KleidiAI had room was written down
+> before the run. Full ladders, noise floor and kernel evidence below.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/amaan784/arm-firstflight-infer-lab/actions/workflows/ci.yml)
@@ -51,16 +53,17 @@ Then it does three things a benchmark normally won't:
 - **Proves the kernels engaged.** It reads the weight-buffer line and ISA flags out of the
   model-load log and names the tier that ran (I8MM / DOTPROD / SVE2 / NEON). If the marker is
   missing, no claim is made.
-- **Runs a negative control:** the KleidiAI build against Q4_K_M, where its kernels cannot
-  engage. The probe must report INACTIVE. If it ever doesn't, the detection is broken and every
-  other KleidiAI number here is void. (Implemented and gated behind the `run_quant_sweep`
-  input; not part of the ~2h50m headline run below.)
+- **Ships a negative control:** the KleidiAI build against Q4_K_M, where its kernels cannot
+  engage. The probe must report INACTIVE; if it ever doesn't, the detection is broken and
+  every other KleidiAI number here is void. Stated plainly: this one is **built but not yet
+  run**. It sits behind `run_quant_sweep`, which also drags in ~11h of secondary sweeps and
+  overruns the CI timeout, so it needs a runner you own. Nothing below depends on it.
 - **Refuses to claim wins inside its own noise.** The same build is measured twice under two
   labels to establish a floor. A delta that doesn't clear it shows `within noise` on the
   metric card instead of a multiplier, and the headline reads `No claimed win`.
 
-Measurements run on Arm Neoverse and center on the metric agentic and RAG apps feel:
-time-to-first-token on long contexts.
+Measurements run on Arm Neoverse N2 (Azure Cobalt 100, the free `ubuntu-24.04-arm` runner)
+and center on the metric agentic and RAG apps feel: time-to-first-token on long contexts.
 
 ### What the ladder actually measured
 
@@ -235,7 +238,7 @@ measurement methodology; and the commit history: the repo was committed stage by
 stage (foundation → benchmark → report → profiling → experiments → autotuner → integration →
 hardening), so stepping through the commits replays how a rig like this gets assembled.
 
-**Why it should win.**
+**How this maps to the challenge criteria.**
 - **Technological Implementation:** a real, non-trivial Arm optimization axis (KleidiAI Q4_0
   kernels, thread pinning, quant schemes) with measured deltas and variance, profiled by
   Arm Performix, with negative results (k-quants skip KleidiAI) documented rather than hidden.
@@ -243,7 +246,7 @@ hardening), so stepping through the commits replays how a rig like this gets ass
   submissions ("use Arm Performix to measure and validate the impact of your optimizations",
   per the [challenge Getting Started
   update](https://arm-ai-optimization-challenge.devpost.com/updates)).
-- **WOW:** an auto-generated one-page HTML report, led by the headline number.
+- **Wow factor:** an auto-generated one-page HTML report, led by the headline number.
 - **Potential Impact:** TTFT on long contexts is the cost/UX bottleneck for agentic & RAG
   workloads on cloud CPUs, which is where Graviton/Ampere economics matter; every artifact
   above is reusable on any llama.cpp-on-Arm deployment.

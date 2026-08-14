@@ -6,8 +6,10 @@ not spoken.
 Have these open before you record:
 
 1. `README.md` on GitHub, scrolled to the top
-2. `bench/reports/report-20260814-193627.html` (the Q4_0 report)
-3. The green run: https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31784946201
+2. The newest Q4_0 report: `bench/reports/report-20260814-215555.html`
+   (filenames are timestamped; if you re-render, take the newest `bench/reports/*.html`)
+3. The green runs: 31656321896 (Q4_0) and 31784946201 (Q8_0), both under
+   https://github.com/amaan784/arm-firstflight-infer-lab/actions
 
 ---
 
@@ -15,16 +17,14 @@ Have these open before you record:
 
 This is Arm FirstFlight.
 
-I want to show you something about KleidiAI benchmarks that I think is wrong.
-
-Here's how everyone measures it. You build llama.cpp normally. You build it again with
-KleidiAI switched on. You compare the two, and you publish the number.
+Every KleidiAI benchmark works the same way. Build llama.cpp normally, build it again with
+KleidiAI on, compare, publish the number.
 
 The problem is that first build.
 
 In llama.cpp's own CMake file, two flags default to on. Native targeting, and ggml's own
 Arm repack kernels. So your "before" build is already Arm-optimized. You're comparing one
-Arm optimization against another, and handing KleidiAI the credit for both.
+Arm optimization against another, and handing KleidiAI credit for both.
 
 **[scroll to the ladder diagram]**
 
@@ -33,8 +33,8 @@ So we built the baseline nobody builds. Native off. Plain armv8-a. Repack off.
 Then three rungs. Same model, same machine, same run. Generic, then repack, then KleidiAI.
 Each one has to earn its own number.
 
-We also ran the identical build twice under two different labels, just to see how much the
-machine wobbles on its own. That's our noise floor. Nought point three percent.
+We also ran the identical build twice under two labels, to see how much the machine wobbles
+on its own. That's our noise floor. Zero point three percent.
 
 **[scroll to the Q4_0 ladder table]**
 
@@ -49,15 +49,17 @@ And that is not a broken test.
 
 **[scroll to the kernel evidence table]**
 
-Look at the load log. Three different weight buffers, three different kernel tiers.
-KleidiAI loaded. It just had nothing left to take, because repack got there first.
+Look at the load log. Three different weight buffers. The floor build can't even reach
+the i8mm tier.
+
+So KleidiAI loaded. It just had nothing left to take, because repack got there first.
 
 The standard benchmark would have reported that entire three point six as a KleidiAI win.
 
 **[scroll to the Q8_0 table]**
 
-Now, ggml's repack is built for Q4_0. So we predicted KleidiAI would have room at Q8_0
-instead. We wrote that down first, then we ran it.
+Now, ggml's repack is built for Q4_0. So we predicted KleidiAI would have room at Q8_0.
+We wrote that down first, then ran it.
 
 One point two three at two thousand tokens. One point one three at four thousand. One point
 one five on generation.
@@ -112,4 +114,4 @@ Even when the honest answer is that nothing happened.
 - Don't quote a dollar figure. Both runs are on a free runner priced at $0/hr.
 - Don't claim a Q8_0 noise floor. That run skipped it. If you need to qualify the 1.23x, say
   "far outside the nought point three percent floor we measured at Q4_0".
-- Don't say 32k context. The runs cover 1k to 8k.
+- Don't say 32k context. Q4_0 covers 1k to 8k, Q8_0 covers 2k to 8k.

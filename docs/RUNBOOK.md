@@ -105,7 +105,7 @@ git checkout main                # back to the current project
    | inputs | what runs | time |
    |---|---|---|
    | defaults | Q4_0 ladder + noise floor + TTFT + concurrency | ~2h50m |
-   | `run_q8_only: true` | the Q8_0 ladder alone | ~3h |
+   | `run_q8_only: true` | the Q8_0 ladder alone | ~2h (measured 1h58m) |
    | `run_quant_sweep: true` | everything | ~14h, **exceeds the timeout** |
 
    `run_q8_only` exists because the Q4_0 ladder understates KleidiAI: ggml's repack already

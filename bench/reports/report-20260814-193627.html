@@ -34,7 +34,7 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;border-top:1px solid va
 <body><div class="wrap">
 
 <div class="kicker">Arm FirstFlight - Inference Optimization</div>
-<h1 class="head">1.10x SLOWER prefill at 8,192-token context (kleidiai vs generic), well outside the 0.3% noise floor</h1>
+<h1 class="head">3.62x faster prefill at 1k, inverting to 0.91x at 8k (kleidiai vs generic): the advantage is context-dependent</h1>
 <ul class="subs"><li>TTFT 362.66s -&gt; 400.37s at 8,192 tokens (kleidiai vs generic)</li><li>prefill 23 -&gt; 20 tok/s</li><li>generation 19 -&gt; 35 tok/s</li><li>context-dependent: 3.62x at 1k -&gt; 0.91x at 8k (the delta is a curve, not a number)</li><li>measured noise floor (same build, twice): 0.3% - this delta is a REGRESSION well outside it</li><li>measured prompt-cache TTFT: cold 8492ms -&gt; warm 54ms (99% less prefill on the warm turn)</li></ul>
 <div class="cards"><div class="card"><div class="v">1.10x slower</div><div class="l">prefill @ 8k vs generic</div></div><div class="card"><div class="v">400.37s</div><div class="l">TTFT @ 8k (kleidiai)</div></div><div class="card"><div class="v">20</div><div class="l">prefill tok/s</div></div><div class="card"><div class="v">$0.00</div><div class="l">$/M prompt tok (free runner)</div></div></div>
 
@@ -72,6 +72,6 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;border-top:1px solid va
 
 <div class="note">Run `firstflight experiment` to add the quality-delta column (proves the speedup did not degrade accuracy).</div>
 <footer>Instance: github-arm-runner (GitHub-hosted Arm runner (ubuntu-24.04-arm)) &middot; CPU: CPU &middot; THP: madvise &middot;
- firstflight 0.1.0 &middot; generated 2026-08-14 03:19 UTC &middot;
+ firstflight 0.1.0 &middot; generated 2026-08-14 19:36 UTC &middot;
  Methodology: docs/METHODOLOGY.md</footer>
 </div></body></html>

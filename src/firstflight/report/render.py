@@ -655,6 +655,20 @@ def _headline(baseline, others, rows, instance, priced, floor_pct=None):
                 held = "held" if oq >= bq - 0.02 else "down"
                 subs.append(f"quality {bq:.0%} -> {oq:.0%} ({held})")
                 cards.append((f"{oq:.0%}", "quality (probe)"))
+        # When the delta crosses 1.0 somewhere in the sweep, no single context is the result.
+        # Reporting the widest context alone would headline the crossover and read as a plain
+        # regression; reporting the best would read as a plain win. Both are the same curve,
+        # so the headline carries both ends and names the shape.
+        if span:
+            (lo_ctx, lo), (hi_ctx, hi) = span
+            if lo < 1.0 < hi:
+                return (
+                    f"{hi:.2f}x faster prefill at {_ctx_label(hi_ctx)}, inverting to "
+                    f"{lo:.2f}x at {_ctx_label(lo_ctx)} ({best.label} vs {baseline.label}): "
+                    f"the advantage is context-dependent",
+                    subs,
+                    cards,
+                )
         if verdict == "within noise":
             return (
                 f"No claimed win: the delta at {_ctx_label(best_ctx)} ({speed:.2f}x) sits inside "

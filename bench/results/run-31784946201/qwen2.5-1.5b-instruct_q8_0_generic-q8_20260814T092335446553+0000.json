@@ -1,0 +1,102 @@
+{
+  "label": "generic-q8",
+  "timestamp": "2026-08-14T09:23:35.446553+00:00",
+  "workload": "rag-context",
+  "host": {
+    "platform": "Linux-aarch64",
+    "arch": "aarch64",
+    "cpu_count": 4,
+    "is_arm_linux": true,
+    "cpu_info": "CPU",
+    "kleidiai": false,
+    "thp": "madvise",
+    "system_info": "n_threads = 4 (n_threads_batch = 4) / 4 | CPU : NEON = 1 | ARM_FMA = 1 | LLAMAFILE = 1 | OPENMP = 1 |",
+    "kernel_buffer": "CPU_Mapped 1801.09 MiB",
+    "cpu_features": "fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 sve asimdfhm uscat ilrcpc flagm sb paca pacg dcpodp sve2 sveaes svebitperm svesha3 svesm4 flagm2 frint svei8mm svebf16 i8mm bf16",
+    "kernel_tier": "NEON",
+    "repack": false
+  },
+  "engine": {
+    "name": "llama.cpp",
+    "build_number": 1,
+    "build_commit": "a410713",
+    "backends": "CPU",
+    "binary": "/home/runner/work/arm-firstflight-infer-lab/arm-firstflight-infer-lab/llama-generic/build/bin/llama-bench"
+  },
+  "model": {
+    "id": "qwen2.5-1.5b-instruct",
+    "variant": "q8_0",
+    "filename": "/home/runner/work/arm-firstflight-infer-lab/arm-firstflight-infer-lab/models/qwen2.5-1.5b-instruct-q8_0.gguf",
+    "size_bytes": 1888581632,
+    "n_params": 1777088000
+  },
+  "threads": 4,
+  "repetitions": 3,
+  "n_gen": 64,
+  "peak_rss_bytes": 2271641600,
+  "points": [
+    {
+      "kind": "pp",
+      "n_prompt": 2048,
+      "n_gen": 0,
+      "throughput_tok_s": 28.247495,
+      "throughput_stddev": 0.023267,
+      "ttft_s": 72.50200416001489,
+      "threads": 4,
+      "samples_ts": [
+        28.2208,
+        28.2631,
+        28.2586
+      ]
+    },
+    {
+      "kind": "pp",
+      "n_prompt": 4096,
+      "n_gen": 0,
+      "throughput_tok_s": 26.904367,
+      "throughput_stddev": 0.01049,
+      "ttft_s": 152.24294256765083,
+      "threads": 4,
+      "samples_ts": [
+        26.8927,
+        26.9131,
+        26.9073
+      ]
+    },
+    {
+      "kind": "pp",
+      "n_prompt": 8192,
+      "n_gen": 0,
+      "throughput_tok_s": 24.439543,
+      "throughput_stddev": 0.029495,
+      "ttft_s": 335.1944837921069,
+      "threads": 4,
+      "samples_ts": [
+        24.473,
+        24.4284,
+        24.4172
+      ]
+    },
+    {
+      "kind": "tg",
+      "n_prompt": 0,
+      "n_gen": 64,
+      "throughput_tok_s": 18.060351,
+      "throughput_stddev": 0.061329,
+      "ttft_s": null,
+      "threads": 4,
+      "samples_ts": [
+        18.0177,
+        18.0327,
+        18.1306
+      ]
+    }
+  ],
+  "quality": {
+    "ppl": 31.663
+  },
+  "experiment": "kleidiai-q8_0",
+  "schema_version": 1,
+  "tool": "firstflight",
+  "tool_version": "0.1.0"
+}

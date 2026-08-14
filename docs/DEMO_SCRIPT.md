@@ -6,7 +6,7 @@ not spoken.
 Have these open before you record:
 
 1. `README.md` on GitHub, scrolled to the top
-2. The newest Q4_0 report: `bench/reports/report-20260814-215555.html`
+2. The newest Q4_0 report: `bench/reports/report-20260814-230410.html`
    (filenames are timestamped; if you re-render, take the newest `bench/reports/*.html`)
 3. The green runs: 31656321896 (Q4_0) and 31784946201 (Q8_0), both under
    https://github.com/amaan784/arm-firstflight-infer-lab/actions

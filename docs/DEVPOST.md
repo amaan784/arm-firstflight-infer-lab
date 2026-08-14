@@ -48,7 +48,7 @@ Arm64 cloud instances. It:
 - **Measures** prefill/TTFT scaling across context lengths (1k → 8k tokens on the free
   runner, configurable higher) with warm-ups,
   repeats, and variance (fixed seeds + greedy decoding in the generation/quality probes),
-  plus TTFT taken from llama-server's own timings and concurrency throughput at 1–8
+  plus TTFT taken from llama-server's own timings and concurrency throughput at 1-8
   parallel requests.
 - **Optimizes** along seven Arm-specific axes: KleidiAI microkernels (as an attribution
   ladder over ggml's own aarch64 repack path), quant scheme chosen for the silicon (Q4_0 vs

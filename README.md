@@ -21,8 +21,8 @@
 Built for the **Arm Create: AI Optimization Challenge (Cloud AI track)**.
 
 **Read the measured results:**
-[Q4_0 report](bench/reports/report-20260814-215555.md) ·
-[Q8_0 report](bench/reports/report-20260814-215557.md) ·
+[Q4_0 report](bench/reports/report-20260814-230410.md) ·
+[Q8_0 report](bench/reports/report-20260814-230412.md) ·
 [raw result JSONs](bench/results/) ·
 [the CI runs that produced them](https://github.com/amaan784/arm-firstflight-infer-lab/actions)
 
@@ -83,7 +83,7 @@ and center on the metric agentic and RAG apps feel: time-to-first-token on long 
 
 Qwen2.5-1.5B-Instruct Q4_0, 4 threads, free `ubuntu-24.04-arm` runner (Azure Cobalt 100,
 Neoverse N2), median of 2 interleaved rounds.
-[Full report](bench/reports/report-20260814-215555.md) ·
+[Full report](bench/reports/report-20260814-230410.md) ·
 [raw results](bench/results/run-31656321896/) ·
 [run 31656321896](https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31656321896)
 
@@ -120,7 +120,7 @@ spread), so at this quant the kernel swap is output-neutral.
 ggml's repack targets Q4_0. So if the Q4_0 null is really "repack got there first", KleidiAI
 should have room at Q8_0. That prediction is written into the workflow, and this is the run
 that tested it: `rag-context`, 3 repetitions.
-[Full report](bench/reports/report-20260814-215557.md) ·
+[Full report](bench/reports/report-20260814-230412.md) ·
 [raw results](bench/results/run-31784946201/) ·
 [run 31784946201](https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31784946201)
 
@@ -171,7 +171,7 @@ flowchart LR
     A["setup-engine\nprebuilt llama.cpp"] --> B["bench\nprefill/TTFT sweep"]
     A --> C["ttft\nmeasured, prompt cache"]
     A --> D["throughput\n1-8 parallel"]
-    subgraph CI["free Arm CI — ubuntu-24.04-arm (3 builds: generic / repack / KleidiAI)"]
+    subgraph CI["free Arm CI, ubuntu-24.04-arm (3 builds: generic / repack / KleidiAI)"]
         B --> E["experiment\nladder + quality + ppl"]
         E --> F["report\nHTML + MD, in run summary"]
         C --> F

@@ -239,6 +239,14 @@ def _headline_pair(results: list[SweepResult]):
             or cand_map[ctx].throughput_tok_s > _prefill_map(best)[ctx].throughput_tok_s
         ):
             best, best_ctx = cand, ctx
+
+    # Same adjacent-rung rule the headline uses. The charts are the most-shared artifact in
+    # the whole report, so a TTFT chart titled "kleidiai vs generic" would put the bundled
+    # comparison this project exists to reject onto the one image people screenshot.
+    if len(others) >= 2 and best is not None and best_ctx is not None:
+        top, rung_below = others[-1], others[-2]
+        if best_ctx in _prefill_map(top) and best_ctx in _prefill_map(rung_below):
+            baseline, best = rung_below, top
     return baseline, best, best_ctx
 
 

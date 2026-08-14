@@ -239,9 +239,12 @@ stage (foundation → benchmark → report → profiling → experiments → aut
 hardening), so stepping through the commits replays how a rig like this gets assembled.
 
 **How this maps to the challenge criteria.**
-- **Technological Implementation:** a real, non-trivial Arm optimization axis (KleidiAI Q4_0
-  kernels, thread pinning, quant schemes) with measured deltas and variance, profiled by
-  Arm Performix, with negative results (k-quants skip KleidiAI) documented rather than hidden.
+- **Technological Implementation:** a real, non-trivial Arm optimization axis (KleidiAI
+  kernels at Q4_0 and Q8_0, build targeting, quant schemes) with measured deltas, a measured
+  noise floor and kernel-level activation evidence, and negative results (KleidiAI's 1.00x at
+  Q4_0; k-quants skipping it entirely) reported rather than hidden. Performix profiling is
+  wired to Arm's documented `apx` recipe flow and renders into the report where `apx` is
+  present; it is not on the GitHub runner, so the step reports a skip instead of pretending.
   Performix is the measurement tool the organizers recommend for Neoverse/cloud
   submissions ("use Arm Performix to measure and validate the impact of your optimizations",
   per the [challenge Getting Started

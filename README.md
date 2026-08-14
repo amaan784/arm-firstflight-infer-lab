@@ -66,7 +66,7 @@ time-to-first-token on long contexts.
 
 Qwen2.5-1.5B-Instruct Q4_0, 4 threads, free `ubuntu-24.04-arm` runner (Azure Cobalt 100,
 Neoverse N2), median of 2 interleaved rounds.
-[Full report](bench/reports/report-20260814-031936.md) ·
+[Full report](bench/reports/report-20260814-215555.md) ·
 [raw results](bench/results/run-31656321896/) ·
 [run 31656321896](https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31656321896)
 
@@ -95,8 +95,41 @@ the model-load log:
 | + KleidiAI | `CPU_KLEIDIAI` 702.86 MiB | I8MM |
 
 KleidiAI engaged. It simply had nothing left to win, because repack had already taken it.
-Perplexity is flat across all three rungs (37.43 / 37.42 / 37.42), so the kernel swap is
-output-neutral.
+Perplexity is flat across all three rungs at Q4_0 (37.4325 / 37.4181 / 37.4181, a 0.04%
+spread), so at this quant the kernel swap is output-neutral.
+
+### Q8_0: the same ladder, the opposite answer
+
+ggml's repack targets Q4_0. So if the Q4_0 null is really "repack got there first", KleidiAI
+should have room at Q8_0. That prediction is written into the workflow, and this is the run
+that tested it: `rag-context`, 3 repetitions.
+[Full report](bench/reports/report-20260814-215557.md) ·
+[raw results](bench/results/run-31784946201/) ·
+[run 31784946201](https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31784946201)
+
+| prompt tokens | generic armv8-a | + native & ggml repack | + KleidiAI | repack vs generic | **KleidiAI vs repack** |
+|---:|---:|---:|---:|---:|---:|
+| 2,048 | 28.2 tok/s | 58.8 | 72.5 | 2.08x | **1.23x** |
+| 4,096 | 26.9 | 35.8 | 40.3 | 1.33x | **1.13x** |
+| 8,192 | 24.4 | 20.1 | 21.4 | 0.82x | **1.07x** |
+| generation | 18.1 | 39.2 | 45.2 | 2.17x | **1.15x** |
+
+**At Q8_0 KleidiAI earns its keep: 1.23x over repack at 2k, and 1.15x on generation.** The
+kernel evidence says why. At Q4_0 the KleidiAI build reports `repack=on`; at Q8_0 it reports
+`repack=off, kleidiai=on`, loading `CPU_KLEIDIAI` where repack cannot follow. A different
+code path, not more of the same one.
+
+So the standard benchmark is wrong in **both** directions. It hands KleidiAI credit it did
+not earn at Q4_0, and it never tests the quant where it does.
+
+**The speedup is not free.** Perplexity across the Q8_0 rungs spreads 1.43% (31.6267 to
+32.0774), with KleidiAI the outlier, against 0.04% at Q4_0 where repack and KleidiAI agreed
+to six significant figures. A 23% speedup that moves model output by 1.4% is a trade, and
+the report labels it as one. A speed-only benchmark would ship it silently.
+
+Two caveats, stated rather than buried: `run_q8_only` skips the noise-floor control, so these
+deltas are weighed against the 0.3% floor measured at Q4_0 rather than one of their own; and
+perplexity is a single measurement per rung, so the 1.43% has no error bar.
 
 **Two secondary findings:**
 
@@ -168,9 +201,10 @@ delta. Closing that gap is the optimization story.
   (generic armv8-a floor / native+repack default / KleidiAI), runs the attribution ladder in
   2 interleaved rounds plus a same-build noise-floor control, and the measured-TTFT and
   concurrency sweeps on a free Arm runner, then writes the report into the run summary. That
-  is the ~2h50m default. The secondary sweeps (build-flags, quant, KV-cache, micro-batch,
-  Q8_0 ladder, negative control) add roughly 11 hours, past the job's 300-minute timeout, so
-  they sit behind the `run_quant_sweep` input for a runner you control. (Thread/pinning/flash-attn
+  is the ~2h50m default. The Q8_0 ladder runs standalone in ~2h via the `run_q8_only` input
+  (that is the run that produced the KleidiAI result below). The remaining sweeps
+  (build-flags, quant, KV-cache, micro-batch, negative control) add roughly 11 hours, past
+  the job's 300-minute timeout, so they sit behind `run_quant_sweep` for a runner you own. (Thread/pinning/flash-attn
   sweeps run anywhere via `firstflight experiment --name …`.)
 - Attribution is split by mechanism: a plain llama.cpp Release build already carries native
   targeting and ggml's own aarch64 Q4_0 repack kernels (`GGML_NATIVE`/`GGML_CPU_REPACK`

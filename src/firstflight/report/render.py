@@ -307,6 +307,30 @@ def _quality_acc(q) -> float | None:
     return None
 
 
+def _fmt_spread(sd: float | None) -> str:
+    """Render a repetition spread without rounding a small one away to '±0'.
+
+    llama-bench's spread across repetitions is routinely far below 1 tok/s: the Q8_0 ladder
+    measured 0.02 on 72 tok/s. Printed at zero decimals that becomes '±0', which reads as a
+    perfectly reproducible measurement rather than a very tight one, and that is a stronger
+    claim than the run can support.
+    """
+    if sd is None:
+        return ""
+    if sd >= 0.5:
+        return f"±{sd:.0f}"
+    if sd >= 0.005:
+        return f"±{sd:.2f}"
+    return "±0.00" if sd else "±0"
+
+
+def _quality_ppl(q) -> float | None:
+    """Perplexity for a run, or None. Present whenever the ladder ran, probe or no probe."""
+    if isinstance(q, dict) and q.get("ppl") is not None:
+        return float(q["ppl"])
+    return None
+
+
 def _quality_counts(q) -> tuple[int, int] | None:
     if isinstance(q, dict) and q.get("n_total"):
         return int(q.get("n_correct", 0)), int(q["n_total"])
@@ -401,7 +425,9 @@ def build_report_model(
             cells[r.label] = {
                 "ttft": _fmt_ttft(pt.ttft_s) if pt else "-",
                 # tok/s with the spread across repetitions, so the noise is visible
-                "tput": f"{pt.throughput_tok_s:.0f} ±{pt.throughput_stddev:.0f}" if pt else "-",
+                "tput": f"{pt.throughput_tok_s:.0f} {_fmt_spread(pt.throughput_stddev)}"
+                if pt
+                else "-",
             }
         prefill_table.append({"ctx": ctx, "ctx_label": _ctx_label(ctx), "cells": cells})
 
@@ -419,14 +445,38 @@ def build_report_model(
             f"{t.warm.prompt_ms:.0f}ms ({t.reduction_pct:.0f}% less prefill on the warm turn)"
         )
 
-    has_quality = any(_quality_acc(r.quality) is not None for r in results)
-    quality = (
-        "Quality = a small exact-match probe via llama-completion (a regression guardrail, not a "
-        "leaderboard) showing the speedup did not tank accuracy."
-        if has_quality
-        else "Run `firstflight experiment` to add the quality-delta column (proves the "
-        "speedup did not degrade accuracy)."
-    )
+    # The guardrail note must describe what the data SAYS, not what we hoped it would say.
+    # Two earlier bugs lived here: perplexity-only runs were treated as having no quality
+    # data at all (the accuracy probe is optional; perplexity is not), and both branches
+    # asserted the speedup "did not degrade accuracy" without ever consulting the numbers.
+    # On the Q8_0 ladder that assertion was simply false.
+    ppls = [p for p in (_quality_ppl(r.quality) for r in results) if p]
+    has_quality = any(_quality_acc(r.quality) is not None for r in results) or bool(ppls)
+    if not has_quality:
+        quality = (
+            "Run `firstflight experiment` to add the quality columns (perplexity per rung, "
+            "plus the optional exact-match probe)."
+        )
+    else:
+        quality = (
+            "Quality = a regression guardrail, not a leaderboard: perplexity per rung, plus a "
+            "small exact-match probe via llama-completion where it was run."
+        )
+        # Flag drift rather than leaving the reader to diff the column by eye. Kernels that
+        # only reorder arithmetic should land on the same perplexity; a rung that doesn't is
+        # buying its speed with numerics, which is exactly what this column is for.
+        if len(ppls) > 1 and min(ppls) > 0:
+            drift = (max(ppls) - min(ppls)) / min(ppls) * 100.0
+            quality += (
+                f" Perplexity spread across rungs: {drift:.2f}% "
+                f"({min(ppls):.4f} to {max(ppls):.4f})"
+                + (
+                    " - the fastest rung is NOT output-neutral; treat the speedup as a "
+                    "trade, not a free win."
+                    if drift >= 0.5
+                    else " - consistent with the kernels being output-neutral."
+                )
+            )
 
     # Newest non-skipped Performix profile, if any.
     hotspots: list[Hotspot] = []
@@ -587,6 +637,23 @@ def _headline(baseline, others, rows, instance, priced, floor_pct=None):
         ):
             best, best_ctx = cand, ctx
 
+    # On a multi-rung ladder the headline compares ADJACENT rungs. Running the top rung
+    # straight against the unaccelerated floor folds every mechanism below it into one
+    # number, which is the exact attribution error this harness exists to catch: KleidiAI
+    # vs generic hands KleidiAI credit for ggml's repack as well. The cumulative delta is
+    # still reported, as a sub-bullet, where it cannot be read as one mechanism's doing.
+    cumulative = None
+    if len(others) >= 2 and best is not None and best_ctx is not None:
+        top, rung_below = others[-1], others[-2]
+        top_map, below_map = _prefill_map(top), _prefill_map(rung_below)
+        if (
+            best_ctx in top_map
+            and below_map.get(best_ctx, None)
+            and below_map[best_ctx].throughput_tok_s
+        ):
+            cumulative = (baseline.label, base_map)
+            baseline, base_map, best = rung_below, below_map, top
+
     if best is not None and best_ctx is not None:
         b = base_map[best_ctx]
         o = _prefill_map(best)[best_ctx]
@@ -607,6 +674,15 @@ def _headline(baseline, others, rows, instance, priced, floor_pct=None):
                 subs.append(
                     f"context-dependent: {hi:.2f}x at {_ctx_label(hi_ctx)} -> {lo:.2f}x at "
                     f"{_ctx_label(lo_ctx)} (the delta is a curve, not a number)"
+                )
+        if cumulative:
+            floor_label, floor_map = cumulative
+            fp = floor_map.get(best_ctx)
+            if fp and fp.throughput_tok_s:
+                cum = o.throughput_tok_s / fp.throughput_tok_s
+                subs.append(
+                    f"cumulative vs {floor_label}: {cum:.2f}x at {_ctx_label(best_ctx)} "
+                    f"(every rung combined, not {best.label} alone)"
                 )
         if floor_pct is not None:
             phrase = {

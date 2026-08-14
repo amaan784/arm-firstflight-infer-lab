@@ -1,7 +1,8 @@
 # Devpost submission draft (ready to paste)
 
-> Numbers below are the real measured results from `arm-bench` → `kleidiai-before-after`
-> run 31656321896. Add the video link before submitting; everything else is ready to paste.
+> Numbers below are the real measured results from two `arm-bench` runs: 31656321896
+> (Q4_0 ladder + noise floor) and 31784946201 (Q8_0 ladder). Add the video link before
+> submitting; everything else is ready to paste.
 
 ## Project name
 **Arm FirstFlight — Inference Optimization Lab**
@@ -24,13 +25,14 @@ KleidiAI's kernels never engage at all; upstream added a warning for this case i
 So the number everyone quotes is unattributable. FirstFlight fixes the measurement:
 
 - **Builds the true floor** (`GGML_NATIVE=OFF`, `GGML_CPU_ARM_ARCH=armv8-a`,
-  `GGML_CPU_REPACK=OFF`) and runs a three-rung ladder against it. The headline run covers
-  Q4_0; the same ladder at Q8_0 is wired and gated behind a workflow input, because ggml's
-  repack targets Q4_0 and measuring only that quant understates KleidiAI's contribution.
+  `GGML_CPU_REPACK=OFF`) and runs a three-rung ladder against it, at Q4_0 and again at
+  Q8_0. ggml's repack targets Q4_0, so measuring only that quant understates KleidiAI: the
+  two ladders give opposite answers, and that contrast is the result.
 - **Proves engagement** from the model-load log: which weight buffer loaded, which ISA tier
   ran (I8MM / DOTPROD / SVE2 / NEON). No marker, no claim.
 - **Runs a negative control**: the KleidiAI build on Q4_K_M, where the probe must report
-  INACTIVE. This tests the instrument, not the silicon.
+  INACTIVE. This tests the instrument, not the silicon. (Implemented and gated behind a
+  workflow input; not part of either linked run.)
 - **Refuses wins inside its own noise**: the same build measured twice sets the floor, and any
   delta that doesn't clear it prints `within noise` instead of a multiplier, with the headline
   reading `No claimed win`.
@@ -64,7 +66,8 @@ Arm64 cloud instances. It:
 Qwen2.5-1.5B-Instruct Q4_0, 4 threads: **ggml's own aarch64 repack path delivers 3.60x
 faster prefill at 1,024 tokens, and KleidiAI adds 1.00x on top of it.** TTFT at 1k drops
 38.9s → 10.8s from repack alone; KleidiAI moves it to 10.7s. Perplexity is flat across all
-three rungs (37.43 → 37.42 → 37.42), so the kernel swap is output-neutral.
+three rungs at Q4_0 (37.4325 / 37.4181 / 37.4181, a 0.04% spread), so at this quant the
+kernel swap is output-neutral. That does not hold at Q8_0 - see below.
 
 Against a measured noise floor of 0.3%, that 1.00x is a genuine null, not a failed
 measurement: KleidiAI demonstrably engaged (weight buffer `CPU_KLEIDIAI` 702.86 MiB vs
@@ -86,11 +89,33 @@ Two findings we did not go looking for:
   same prefix, taken from llama-server's own timings. 99% of prefill skipped, against 0-1%
   for the kernel swap this entire ladder exists to measure.
 
-**Scope of this run, stated plainly:** one model (Qwen2.5-1.5B-Instruct), one quant (Q4_0),
-one host (4-vCPU Neoverse N2), 1k-8k context, 2 rounds. The Q8_0 ladder, the Q4_K_M negative
-control and the quant/KV-cache/micro-batch sweeps are implemented and gated behind a workflow
-input: they add roughly 11 hours, past the CI job's 300-minute timeout. Everything claimed
-above was measured in the linked run; nothing was extrapolated.
+**Then we tested the prediction.** ggml's repack targets Q4_0, so if the null really is
+"repack got there first", KleidiAI should have room at Q8_0. We ran that ladder:
+
+| prompt tokens | generic | repack | KleidiAI | **KleidiAI vs repack** |
+|---:|---:|---:|---:|---:|
+| 2,048 | 28.2 | 58.8 | 72.5 | **1.23x** |
+| 4,096 | 26.9 | 35.8 | 40.3 | **1.13x** |
+| generation | 18.1 | 39.2 | 45.2 | **1.15x** |
+
+**At Q8_0 KleidiAI earns 1.23x over repack.** At Q4_0 its build reports `repack=on`; at Q8_0
+it reports `repack=off, kleidiai=on` and loads `CPU_KLEIDIAI` where repack cannot follow.
+Different code path, not more of the same one.
+
+So the standard benchmark is wrong in **both** directions: it credits KleidiAI for work it
+did not do at Q4_0, and it never tests the quant where it does.
+
+**And the guardrail caught a cost.** Perplexity across the Q8_0 rungs spreads 1.43% (31.6267
+to 32.0774), KleidiAI the outlier, against 0.04% at Q4_0 where repack and KleidiAI agreed to
+six significant figures. A 23% speedup that shifts model output by 1.4% is a trade, and the
+report says so on its face. A speed-only benchmark ships that blind.
+
+**Scope, stated plainly:** one model (Qwen2.5-1.5B-Instruct), two quants, one host (4-vCPU
+Neoverse N2), 1k-8k context. The Q8_0 run skips the noise-floor control, so its deltas are
+weighed against the 0.3% floor measured at Q4_0, and its perplexity is one measurement per
+rung with no error bar. The Q4_K_M negative control and the quant/KV-cache/micro-batch sweeps
+are implemented but gated: they add ~11h, past the CI job's 300-minute timeout. Everything
+claimed above was measured in the linked runs; nothing was extrapolated.
 
 Full report, raw result JSONs and the CI run are linked below; every number here re-renders
 from committed data with one command.

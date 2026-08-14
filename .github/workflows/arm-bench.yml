@@ -21,9 +21,13 @@ on:
         description: "llama.cpp release tag (b9873 verified 2026-07-05; tags float)"
         default: "b9873"
         type: string
+      # Off by default on purpose. The secondary sweeps use the rag-context workload at
+      # repeats=3, which costs ~11h on top of the ~2h50m headline run - past this job's
+      # 300-minute timeout, and the artifact upload is the last step, so an over-budget run
+      # is killed having produced nothing. Enable only on a runner you control.
       run_quant_sweep:
-        description: "Also run the secondary sweeps (quant / KV-cache / ubatch / build-flags)"
-        default: true
+        description: "Also run the secondary sweeps (quant / KV-cache / ubatch / build-flags) - adds ~11h, EXCEEDS the 300min timeout on a GitHub runner"
+        default: false
         type: boolean
       rounds:
         description: "Interleaved rounds for the KleidiAI ladder (1 = fastest; 2 = default, gives a spread)"

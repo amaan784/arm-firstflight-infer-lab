@@ -219,13 +219,20 @@ _TIER_ORDER = [
 ]
 
 
-def kernel_tier(system_info: str, cpu_features: str = "") -> str:
-    """Highest kernel tier the reported ISA flags can reach. "" when nothing is recognized."""
-    hay = f"{system_info} {cpu_features}".upper()
+def kernel_tier(system_info: str) -> str:
+    """Highest kernel tier THIS BUILD can reach, from ggml's own system_info flags.
+
+    Derived from the binary's flags, never from /proc/cpuinfo. Those are two different
+    facts: a build configured `-DGGML_CPU_ARM_ARCH=armv8-a` reports `MATMUL_INT8 = 0` on the
+    very same chip where a native build reports 1. Reading the host's capability here would
+    credit the unaccelerated floor with kernels it was never compiled to reach, and it would
+    do so in the one report section that claims to show what actually ran. The host's own
+    feature list is recorded separately, as context.
+    """
+    hay = system_info.upper()
     for tier, needles in _TIER_ORDER:
         for n in needles:
-            # ggml prints "MATMUL_INT8 = 1"; /proc/cpuinfo prints bare tokens like "i8mm"
-            if f"{n} = 1" in hay or f" {n} " in f" {hay} ":
+            if f"{n} = 1" in hay:  # ggml prints "MATMUL_INT8 = 1"
                 return tier
     return ""
 
@@ -286,7 +293,7 @@ def probe_backend(
         system_info=system_info,
         kernel_buffer=kernel_buffer,
         cpu_features=cpu_features,
-        kernel_tier=kernel_tier(system_info, cpu_features),
+        kernel_tier=kernel_tier(system_info),
         repack=REPACK_MARKER in out,
     )
 

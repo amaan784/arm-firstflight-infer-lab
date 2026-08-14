@@ -25,6 +25,7 @@ from ..bench.result import BenchPoint, SweepResult
 from ..config import InstanceSpec, load_instances
 from ..cost import CostResult
 from ..cost import compute as compute_cost
+from ..engines.llama_cpp import kernel_tier
 from ..profile.performix import Hotspot, ProfileResult
 from ..util import bytes_human, reports_dir, results_dir
 
@@ -443,7 +444,12 @@ def build_report_model(
         if not getattr(r.host, "kernel_buffer", ""):
             continue
         bits = [r.host.kernel_buffer]
-        tier = getattr(r.host, "kernel_tier", "")
+        # Derive the tier from THIS run's own system_info instead of trusting the stored
+        # field. Results recorded before the tier became build-derived carry the host's
+        # capability, which labels an armv8-a floor build "I8MM" on an I8MM machine - in the
+        # one section that claims to show what actually ran, not what the box can do.
+        own_info = getattr(r.host, "system_info", "") or ""
+        tier = kernel_tier(own_info) if own_info else getattr(r.host, "kernel_tier", "")
         if tier:
             bits.append(f"{tier}-tier kernels")
         repack = getattr(r.host, "repack", None)
@@ -518,11 +524,48 @@ def noise_floor_pct(results: list[SweepResult]) -> float | None:
     return max(spreads) if spreads else None
 
 
-def dominates_noise(speed: float, floor_pct: float | None) -> bool:
-    """Whether a speedup clears the measured noise floor. Unknown floor -> don't gate."""
+def _speed_phrase(speed: float) -> str:
+    """ "3.60x faster" / "1.10x slower" - a bare multiplier drops the direction.
+
+    Below 1.0 the honest form inverts the ratio: "0.91x faster" reads as a win to anyone
+    skimming a chart title, when it is really a 10% regression. Chart titles and cards are
+    exactly where a number travels furthest from its context, so the word ships with it.
+    """
+    if speed and speed < 1.0:
+        return f"{1 / speed:.2f}x slower"
+    return f"{speed:.2f}x faster"
+
+
+def _speedup_span(base_map: dict, other_map: dict):
+    """((ctx, min_speedup), (ctx, max_speedup)) across shared contexts, or None.
+
+    A ladder's delta can invert with context: once the matmul is fast, quadratic attention
+    takes over, so a rung that is 3.6x ahead at 1k can fall behind at 8k. Reporting only the
+    largest context would hide the first fact; reporting only the best would hide the second.
+    """
+    pairs = [
+        (ctx, other_map[ctx].throughput_tok_s / base_map[ctx].throughput_tok_s)
+        for ctx in sorted(set(base_map) & set(other_map))
+        if base_map[ctx].throughput_tok_s
+    ]
+    if len(pairs) < 2:
+        return None
+    return min(pairs, key=lambda p: p[1]), max(pairs, key=lambda p: p[1])
+
+
+def noise_verdict(speed: float, floor_pct: float | None) -> str:
+    """ "faster" | "slower" | "within noise" | "unknown floor".
+
+    Three outcomes, not two. A 0.91x delta against a 0.3% floor is a 9% REGRESSION, thirty
+    times the floor; calling that "within noise" (as a plain not-a-win test does) hides a
+    real result. Only a delta whose magnitude sits under the floor is genuinely unresolvable.
+    """
     if floor_pct is None:
-        return True
-    return (speed - 1.0) * 100.0 > floor_pct
+        return "unknown floor"
+    change_pct = (speed - 1.0) * 100.0
+    if abs(change_pct) <= floor_pct:
+        return "within noise"
+    return "faster" if change_pct > 0 else "slower"
 
 
 def _headline(baseline, others, rows, instance, priced, floor_pct=None):
@@ -548,22 +591,36 @@ def _headline(baseline, others, rows, instance, priced, floor_pct=None):
         b = base_map[best_ctx]
         o = _prefill_map(best)[best_ctx]
         speed = (o.throughput_tok_s / b.throughput_tok_s) if b.throughput_tok_s else 0.0
-        clears = dominates_noise(speed, floor_pct)
+        verdict = noise_verdict(speed, floor_pct)
         subs = [
             f"TTFT {_fmt_ttft(b.ttft_s)}s -> {_fmt_ttft(o.ttft_s)}s at {best_ctx:,} tokens "
             f"({best.label} vs {baseline.label})",
             f"prefill {b.throughput_tok_s:.0f} -> {o.throughput_tok_s:.0f} tok/s",
             f"generation {_gen_tput(baseline):.0f} -> {_gen_tput(best):.0f} tok/s",
         ]
+        # The delta at one context is not the result: report how it moves across the sweep,
+        # so a single multiplier can never stand in for a curve that crosses over.
+        span = _speedup_span(base_map, _prefill_map(best))
+        if span:
+            (lo_ctx, lo), (hi_ctx, hi) = span
+            if abs(hi - lo) > 0.02:
+                subs.append(
+                    f"context-dependent: {hi:.2f}x at {_ctx_label(hi_ctx)} -> {lo:.2f}x at "
+                    f"{_ctx_label(lo_ctx)} (the delta is a curve, not a number)"
+                )
         if floor_pct is not None:
-            verdict = "clears it" if clears else "DOES NOT clear it - not claimed as a win"
+            phrase = {
+                "faster": "clears it",
+                "slower": "is a REGRESSION well outside it",
+                "within noise": "does NOT clear it - not claimed either way",
+            }[verdict]
             subs.append(
-                f"measured noise floor (same build, twice): {floor_pct:.1f}% - this delta {verdict}"
+                f"measured noise floor (same build, twice): {floor_pct:.1f}% - this delta {phrase}"
             )
         cards = [
             (
-                f"{speed:.2f}x" if clears else "within noise",
-                f"prefill speedup @ {_ctx_label(best_ctx)}",
+                _speed_phrase(speed) if verdict != "within noise" else "within noise",
+                f"prefill @ {_ctx_label(best_ctx)} vs {baseline.label}",
             ),
             (f"{_fmt_ttft(o.ttft_s)}s", f"TTFT @ {_ctx_label(best_ctx)} ({best.label})"),
             (f"{o.throughput_tok_s:.0f}", "prefill tok/s"),
@@ -598,14 +655,23 @@ def _headline(baseline, others, rows, instance, priced, floor_pct=None):
                 held = "held" if oq >= bq - 0.02 else "down"
                 subs.append(f"quality {bq:.0%} -> {oq:.0%} ({held})")
                 cards.append((f"{oq:.0%}", "quality (probe)"))
-        if not clears:
+        if verdict == "within noise":
             return (
-                f"No claimed win: the best delta ({speed:.2f}x) sits inside the measured "
-                f"{floor_pct:.1f}% noise floor",
+                f"No claimed win: the delta at {_ctx_label(best_ctx)} ({speed:.2f}x) sits inside "
+                f"the measured {floor_pct:.1f}% noise floor",
                 subs,
                 cards,
             )
-        return f"{speed:.2f}x faster prefill at {best_ctx:,}-token context", subs, cards
+        if verdict == "slower":
+            return (
+                f"{1 / speed:.2f}x SLOWER prefill at {best_ctx:,}-token context "
+                f"({best.label} vs {baseline.label}), well outside the {floor_pct:.1f}% noise floor",
+                subs,
+                cards,
+            )
+        # Reached when the floor is unknown, so the direction still has to be honest here:
+        # an unmeasured floor is not licence to call a 0.91x delta a speedup.
+        return f"{_speed_phrase(speed)} prefill at {best_ctx:,}-token context", subs, cards
 
     # Single-run headline.
     if not base_map:
@@ -772,7 +838,8 @@ def build_charts(
             ax.plot(xs, ys_o, marker="o", linewidth=2.6, color=PALETTE[1], label=pair_best.label)
             ax.fill_between(xs, ys_b, ys_o, color=PALETTE[1], alpha=0.12)
             ax.annotate(
-                f"{speed:.2f}x faster\n{saved:.1f}s saved per prompt",
+                f"{_speed_phrase(speed)}\n{abs(saved):.1f}s "
+                f"{'saved' if saved >= 0 else 'added'} per prompt",
                 xy=(pair_ctx, (ys_b[-1] + ys_o[-1]) / 2),
                 xytext=(0.55, 0.55),
                 textcoords="axes fraction",
@@ -803,7 +870,7 @@ def build_charts(
             ax.set_xlabel("context length (prompt tokens)")
             ax.set_ylabel("time-to-first-token (s)")
             title = (
-                f"Prefill TTFT: {speed:.2f}x faster at {_ctx_label(pair_ctx)} context "
+                f"Prefill TTFT: {_speed_phrase(speed)} at {_ctx_label(pair_ctx)} context "
                 f"({pair_best.label} vs {pair_base.label})"
             )
             ax.set_title(title)

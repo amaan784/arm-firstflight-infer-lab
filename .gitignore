@@ -31,6 +31,10 @@ bench/results/local/
 bench/reports/local/
 *.tmp
 
+# Unpacked CI artifact bundles. The results worth keeping get promoted into
+# bench/results/run-<id>/ and rendered; the raw download stays local.
+artifacts/
+
 # OS / editor
 .DS_Store
 Thumbs.db

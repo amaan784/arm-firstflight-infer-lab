@@ -194,16 +194,81 @@ def test_committed_examples_never_contaminate_real_reports(tmp_path):
 
 def test_noise_floor_and_dominance_gate():
     """A delta inside the measured same-build spread must not be claimed as a win."""
-    from firstflight.report.render import dominates_noise, noise_floor_pct
+    from firstflight.report.render import noise_floor_pct, noise_verdict
 
     results, _ = render.synthetic_results()
     # no noise-floor experiment present -> unknown floor -> never gate
     assert noise_floor_pct(results) is None
-    assert dominates_noise(1.01, None) is True
+    assert noise_verdict(1.01, None) == "unknown floor"
 
     # a 5% floor swallows a 3% delta but not a 50% one
-    assert dominates_noise(1.03, 5.0) is False
-    assert dominates_noise(1.50, 5.0) is True
+    assert noise_verdict(1.03, 5.0) == "within noise"
+    assert noise_verdict(1.50, 5.0) == "faster"
+
+
+def test_regression_outside_the_floor_is_not_called_noise():
+    """A slowdown far outside the floor is a result, not an absence of one.
+
+    The measured ladder returned 0.91x at 8k against a 0.3% floor - a 9% regression, thirty
+    times the floor. A two-state gate ("clears it" / "doesn't") files that under the same
+    verdict as an unresolvable tie, which reads as "no effect" when the effect is large and
+    negative. The direction has to survive into the headline.
+    """
+    from firstflight.report.render import noise_verdict
+
+    assert noise_verdict(0.91, 0.3) == "slower"
+    assert noise_verdict(1.00, 0.3) == "within noise"
+    assert noise_verdict(0.999, 0.3) == "within noise"  # inside the floor, either direction
+    assert noise_verdict(3.60, 0.3) == "faster"
+
+
+def test_speedup_span_reports_the_curve_not_a_point():
+    """The ladder's delta inverts with context, so the span must carry both ends.
+
+    Real numbers from the Arm run: repack is 3.60x ahead at 1k and 0.90x behind at 8k. A
+    report that quotes either end alone is telling half the truth.
+    """
+    from firstflight.report.render import _speedup_span
+
+    class P:
+        def __init__(self, t):
+            self.throughput_tok_s = t
+
+    base = {1024: P(26.4), 2048: P(25.7), 4096: P(24.6), 8192: P(22.6)}
+    fast = {1024: P(94.8), 2048: P(62.2), 4096: P(37.0), 8192: P(20.4)}
+
+    (lo_ctx, lo), (hi_ctx, hi) = _speedup_span(base, fast)
+    assert (hi_ctx, round(hi, 2)) == (1024, 3.59)
+    assert (lo_ctx, round(lo, 2)) == (8192, 0.90)
+
+    # a single shared context is a point, not a curve - nothing to report
+    assert _speedup_span({1024: P(26.4)}, {1024: P(94.8)}) is None
+    # a zero-throughput baseline must not raise ZeroDivisionError
+    assert _speedup_span({1024: P(0.0), 2048: P(25.7)}, {1024: P(94.8), 2048: P(62.2)}) is None
+
+
+def test_kernel_evidence_rederives_tier_from_each_runs_own_system_info():
+    """Stored tiers from older runs are stale; the evidence line must not repeat them.
+
+    Every JSON from the first real Arm run carries host.kernel_tier == "I8MM", including the
+    armv8-a floor rung, because the tier was once merged with /proc/cpuinfo. Its own
+    system_info has no MATMUL_INT8. Re-deriving at render time means the section that claims
+    to show what actually ran stops crediting the floor build with kernels it cannot reach.
+    """
+    results, instance = render.synthetic_results()
+    floor, native = results[0], results[1]
+    floor.host.kernel_buffer = "CPU_Mapped 1011.16 MiB"
+    floor.host.system_info = "CPU : NEON = 1 | ARM_FMA = 1 | LLAMAFILE = 1 | OPENMP = 1 |"
+    floor.host.kernel_tier = "I8MM"  # the stale value baked into the committed results
+    native.host.kernel_buffer = "CPU_KLEIDIAI 702.86 MiB"
+    native.host.system_info = "CPU : NEON = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | KLEIDIAI = 1 |"
+    native.host.kernel_tier = "I8MM"
+
+    model = render.build_report_model([floor, native], instance=instance)
+    evidence = " || ".join(model.kernel_evidence)
+
+    assert f"{floor.label}: CPU_Mapped 1011.16 MiB, NEON-tier kernels" in evidence
+    assert f"{native.label}: CPU_KLEIDIAI 702.86 MiB, I8MM-tier kernels" in evidence
 
 
 def test_headline_refuses_win_inside_noise():

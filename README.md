@@ -53,7 +53,8 @@ Then it does three things a benchmark normally won't:
   missing, no claim is made.
 - **Runs a negative control:** the KleidiAI build against Q4_K_M, where its kernels cannot
   engage. The probe must report INACTIVE. If it ever doesn't, the detection is broken and every
-  other KleidiAI number here is void.
+  other KleidiAI number here is void. (Implemented and gated behind the `run_quant_sweep`
+  input; not part of the ~2h50m headline run below.)
 - **Refuses to claim wins inside its own noise.** The same build is measured twice under two
   labels to establish a floor. A delta that doesn't clear it shows `within noise` on the
   metric card instead of a multiplier, and the headline reads `No claimed win`.
@@ -61,12 +62,55 @@ Then it does three things a benchmark normally won't:
 Measurements run on Arm Neoverse and center on the metric agentic and RAG apps feel:
 time-to-first-token on long contexts.
 
-> **Numbers:** this README ships with no headline figure. The one-click
-> [`arm-bench`](.github/workflows/arm-bench.yml) job produces the real ladder, noise floor and
-> negative control on a free `ubuntu-24.04-arm` runner and renders the report into the run
-> summary. A synthetic sample report lives in [`bench/reports/`](bench/reports/) to show the
-> layout; its charts carry a SYNTHETIC DEMO DATA watermark burned into the pixels, because
-> a project that refuses unproven claims cannot lead with illustrative data.
+### What the ladder actually measured
+
+Qwen2.5-1.5B-Instruct Q4_0, 4 threads, free `ubuntu-24.04-arm` runner (Azure Cobalt 100,
+Neoverse N2), median of 2 interleaved rounds.
+[Full report](bench/reports/report-20260814-031936.md) ·
+[raw results](bench/results/run-31656321896/) ·
+[run 31656321896](https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31656321896)
+
+| prompt tokens | generic armv8-a | + native & ggml repack | + KleidiAI | repack vs generic | **KleidiAI vs repack** |
+|---:|---:|---:|---:|---:|---:|
+| 1,024 | 26.4 tok/s | 94.8 | 95.3 | **3.60x** | **1.01x** |
+| 2,048 | 25.7 | 62.2 | 62.4 | **2.42x** | **1.00x** |
+| 4,096 | 24.6 | 37.0 | 37.0 | **1.50x** | **1.00x** |
+| 8,192 | 22.6 | 20.4 | 20.5 | 0.90x | **1.00x** |
+
+**ggml's own aarch64 repack delivers the entire speedup. KleidiAI adds nothing measurable on
+top of it at Q4_0.** Against a measured noise floor of **0.3%** (the same build run twice
+under two labels), a 1.00x delta is a real null rather than a missing measurement, and the
+3.60x is far outside it.
+
+This is the thesis, measured: the usual "KleidiAI on vs off" A/B would have credited KleidiAI
+with all 3.60x. The floor rung is what separates them.
+
+The null is not a detection failure. Each rung loads a different weight buffer, straight from
+the model-load log:
+
+| rung | weight buffer | kernel tier |
+|---|---|---|
+| generic armv8-a | `CPU_Mapped` 1011.16 MiB | NEON |
+| + native & repack | `CPU_REPACK` 885.41 MiB | I8MM |
+| + KleidiAI | `CPU_KLEIDIAI` 702.86 MiB | I8MM |
+
+KleidiAI engaged. It simply had nothing left to win, because repack had already taken it.
+Perplexity is flat across all three rungs (37.43 / 37.42 / 37.42), so the kernel swap is
+output-neutral.
+
+**Two secondary findings:**
+
+- **The advantage inverts with context.** Generic is nearly flat as context grows (26.4 to
+  22.6 tok/s) while the accelerated builds fall off a cliff (94.8 to 20.4), crossing over at
+  8,192 tokens where they land 10% *behind* the floor. Once the matmul is fast, quadratic
+  attention becomes the bottleneck. Peak RSS is identical at 1.3 GiB on every rung, so this
+  is not memory pressure. The mechanism is not established here, only the measurement.
+- **Prefix caching beats every kernel.** Measured from llama-server's own timings: cold TTFT
+  8,492 ms, warm 54 ms on the same prefix. That is 99% of prefill skipped, against 0-1% for
+  the kernel swap that this whole ladder exists to measure.
+
+> Re-render any of it from the committed data:
+> `firstflight report --results-dir bench/results/run-31656321896 --instance github-arm-runner`
 
 **What it is.** A small, reproducible harness that measures where Arm CPU LLM inference
 hurts (prefill / TTFT as context length grows) and how much Arm-specific optimization
@@ -122,9 +166,11 @@ delta. Closing that gap is the optimization story.
 - $/M-token from real prices (AWS pricing feed, dated in [`configs/instances.yaml`](configs/instances.yaml)).
 - One click reproduces it: the `kleidiai-before-after` CI job builds llama.cpp three ways
   (generic armv8-a floor / native+repack default / KleidiAI), runs the attribution ladder in
-  3 interleaved rounds plus a same-build noise-floor control, the build-flags, quant,
-  KV-cache and micro-batch experiments, and the measured-TTFT and concurrency sweeps on a
-  free Arm runner, then writes the report into the run summary. (Thread/pinning/flash-attn
+  2 interleaved rounds plus a same-build noise-floor control, and the measured-TTFT and
+  concurrency sweeps on a free Arm runner, then writes the report into the run summary. That
+  is the ~2h50m default. The secondary sweeps (build-flags, quant, KV-cache, micro-batch,
+  Q8_0 ladder, negative control) add roughly 11 hours, past the job's 300-minute timeout, so
+  they sit behind the `run_quant_sweep` input for a runner you control. (Thread/pinning/flash-attn
   sweeps run anywhere via `firstflight experiment --name …`.)
 - Attribution is split by mechanism: a plain llama.cpp Release build already carries native
   targeting and ggml's own aarch64 Q4_0 repack kernels (`GGML_NATIVE`/`GGML_CPU_REPACK`

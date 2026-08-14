@@ -1,7 +1,7 @@
 # Devpost submission draft (ready to paste)
 
-> Fill the `⟨⟩` placeholders with the REAL numbers from your `arm-bench` →
-> `kleidiai-before-after` CI run before submitting. Everything else is ready.
+> Numbers below are the real measured results from `arm-bench` → `kleidiai-before-after`
+> run 31656321896. Add the video link before submitting; everything else is ready to paste.
 
 ## Project name
 **Arm FirstFlight — Inference Optimization Lab**
@@ -24,8 +24,9 @@ KleidiAI's kernels never engage at all; upstream added a warning for this case i
 So the number everyone quotes is unattributable. FirstFlight fixes the measurement:
 
 - **Builds the true floor** (`GGML_NATIVE=OFF`, `GGML_CPU_ARM_ARCH=armv8-a`,
-  `GGML_CPU_REPACK=OFF`) and runs a three-rung ladder against it, at both Q4_0 and Q8_0.
-  ggml's repack targets Q4_0, so measuring only that quant hides KleidiAI's contribution.
+  `GGML_CPU_REPACK=OFF`) and runs a three-rung ladder against it. The headline run covers
+  Q4_0; the same ladder at Q8_0 is wired and gated behind a workflow input, because ggml's
+  repack targets Q4_0 and measuring only that quant understates KleidiAI's contribution.
 - **Proves engagement** from the model-load log: which weight buffer loaded, which ISA tier
   ran (I8MM / DOTPROD / SVE2 / NEON). No marker, no claim.
 - **Runs a negative control**: the KleidiAI build on Q4_K_M, where the probe must report
@@ -43,7 +44,8 @@ cheaper Arm-specific optimization makes this workload, and whether it costs any 
 ## What it does
 `firstflight` is a pip-installable harness for quantized CPU inference on standard CPU-only
 Arm64 cloud instances. It:
-- **Measures** prefill/TTFT scaling across context lengths (128 → 32k tokens) with warm-ups,
+- **Measures** prefill/TTFT scaling across context lengths (1k → 8k tokens on the free
+  runner, configurable higher) with warm-ups,
   repeats, and variance (fixed seeds + greedy decoding in the generation/quality probes),
   plus TTFT taken from llama-server's own timings and concurrency throughput at 1–8
   parallel requests.
@@ -51,20 +53,47 @@ Arm64 cloud instances. It:
   ladder over ggml's own aarch64 repack path), quant scheme chosen for the silicon (Q4_0 vs
   the default Q4_K_M), thread pinning, quantized KV-cache, prefill micro-batch, compiler
   build targeting (generic armv8-a vs native), and prompt/prefix caching.
-- **Proves it**: KleidiAI activation is detected from the load log (not assumed), every config
-  runs a 40-item exact-match quality guardrail, and costs use real dated AWS prices.
+- **Proves it**: KleidiAI activation is detected from the load log (not assumed), and every
+  rung is checked for output drift (perplexity on the headline run, plus an optional 40-item
+  exact-match probe). Costs use real dated prices; the free CI runner is priced at $0/hr, so
+  the headline run reports no dollar figures rather than borrowing another instance's.
 - **Reports it**: a self-contained one-page HTML report (headline delta, charts, before/after
   tables, hotspots), generated automatically and rendered into the GitHub Actions run summary.
 
-**Headline result (⟨replace with real numbers⟩):** ⟨X⟩× faster prefill at a ⟨ctx⟩-token
-context. TTFT ⟨A⟩s → ⟨B⟩s on ⟨instance/runner⟩; quality held (probe ⟨n/N⟩ → ⟨n/N⟩,
-perplexity ⟨P1⟩ → ⟨P2⟩). Measured up the attribution ladder: generic armv8-a →
-ggml's aarch64 repack → KleidiAI.
+**Headline result:** on a free `ubuntu-24.04-arm` runner (Azure Cobalt 100, Neoverse N2),
+Qwen2.5-1.5B-Instruct Q4_0, 4 threads: **ggml's own aarch64 repack path delivers 3.60x
+faster prefill at 1,024 tokens, and KleidiAI adds 1.00x on top of it.** TTFT at 1k drops
+38.9s → 10.8s from repack alone; KleidiAI moves it to 10.7s. Perplexity is flat across all
+three rungs (37.43 → 37.42 → 37.42), so the kernel swap is output-neutral.
 
-> **Fill-in note (don't paste this):** the free-runner CI ladder measures up to 8k tokens
-> at $0/hr; use those numbers as-is ("on a free `ubuntu-24.04-arm` runner, Azure Cobalt
-> 100"). Only claim 32k context or $/M-token dollar figures if you ran Path B on a
-> paid instance (e.g. c8g.2xlarge), because judges can check the reproduction path.
+Against a measured noise floor of 0.3%, that 1.00x is a genuine null, not a failed
+measurement: KleidiAI demonstrably engaged (weight buffer `CPU_KLEIDIAI` 702.86 MiB vs
+`CPU_REPACK` 885.41 MiB vs `CPU_Mapped` 1011.16 MiB for the floor). It simply had nothing
+left to win at Q4_0, because ggml's repack had already taken it.
+
+**That is the whole point.** The standard "KleidiAI on vs off" A/B would have reported the
+full 3.60x as a KleidiAI win. Only the generic armv8-a floor rung separates the two, and
+building that floor is what this harness does.
+
+Two findings we did not go looking for:
+
+- **The advantage inverts with context.** The generic build is nearly flat as context grows
+  (26.4 → 22.6 tok/s) while the accelerated builds collapse (94.8 → 20.4), crossing over at
+  8,192 tokens where they land 10% behind the floor. Peak RSS is identical at 1.3 GiB on
+  every rung, so it is not memory pressure. We report the measurement and flag the
+  mechanism as open rather than guessing.
+- **Prefix caching beats every kernel we tested.** Cold TTFT 8,492 ms → warm 54 ms on the
+  same prefix, taken from llama-server's own timings. 99% of prefill skipped, against 0-1%
+  for the kernel swap this entire ladder exists to measure.
+
+**Scope of this run, stated plainly:** one model (Qwen2.5-1.5B-Instruct), one quant (Q4_0),
+one host (4-vCPU Neoverse N2), 1k-8k context, 2 rounds. The Q8_0 ladder, the Q4_K_M negative
+control and the quant/KV-cache/micro-batch sweeps are implemented and gated behind a workflow
+input: they add roughly 11 hours, past the CI job's 300-minute timeout. Everything claimed
+above was measured in the linked run; nothing was extrapolated.
+
+Full report, raw result JSONs and the CI run are linked below; every number here re-renders
+from committed data with one command.
 
 > **Gallery note (don't paste this):** embed the report screenshot and the before/after table
 > as images in the Devpost gallery. The rules say judges "are not required to test the Project
@@ -77,7 +106,7 @@ A Python CLI over llama.cpp's own tools (`llama-bench`, `llama-completion`, `lla
 prices) is verified against live sources or real binaries and dated in the repo. The CI
 workflow builds llama.cpp three ways (a generic armv8-a floor with repack+native OFF, the
 native+repack default, and KleidiAI) on a free `ubuntu-24.04-arm` runner and runs the full
-evidence suite (attribution ladder in 3 interleaved rounds, plus a same-build noise-floor
+evidence suite (attribution ladder in 2 interleaved rounds, plus a same-build noise-floor
 control) in one dispatch. Arm Performix is
 wrapped behind the documented `apx` recipe flow (sourced from Arm's own MCP server), and an
 opt-in agent closes the propose→measure loop.
@@ -94,8 +123,9 @@ opt-in agent closes the propose→measure loop.
 ## Accomplishments we're proud of
 - A judge can go from zero to a full Arm before/after report with one workflow click, no
   hardware required, and the report appears in the run summary itself.
-- Every claim is either measured on the same instance with variance shown, or labeled
-  synthetic until the real run lands. The report enforces this with an automatic DEMO banner.
+- The harness reports a null as a null. KleidiAI came out at 1.00x over ggml's repack at
+  Q4_0, and rather than reaching for a friendlier baseline we published it against a measured
+  0.3% noise floor with the weight-buffer evidence proving the kernels really did engage.
 - The repo was committed in stages, each one installable and passing its own tests, so the
   history doubles as a walkthrough for anyone assembling a similar benchmark rig.
 
@@ -146,5 +176,9 @@ threads, and THP mode so any number can be traced to its exact configuration.
 ## Links
 - Repo: https://github.com/amaan784/arm-firstflight-infer-lab (MIT)
 - One-click Arm run (serves as the rules' required "functioning demo / test build" access):
-  ⟨link to a green arm-bench workflow run⟩
-- Video: ⟨link⟩ (script: `docs/DEMO_SCRIPT.md`)
+  https://github.com/amaan784/arm-firstflight-infer-lab/actions/runs/31656321896
+- Report from that run:
+  https://github.com/amaan784/arm-firstflight-infer-lab/blob/main/bench/reports/report-20260814-031936.md
+- Raw results:
+  https://github.com/amaan784/arm-firstflight-infer-lab/tree/main/bench/results/run-31656321896
+- Video: ⟨paste link⟩ (script: `docs/DEMO_SCRIPT.md`)

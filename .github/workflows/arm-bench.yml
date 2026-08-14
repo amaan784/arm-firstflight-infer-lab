@@ -33,6 +33,14 @@ on:
         description: "Interleaved rounds for the KleidiAI ladder (1 = fastest; 2 = default, gives a spread)"
         default: "2"
         type: string
+      # The Q4_0 ladder understates KleidiAI: ggml's repack already owns most of the Q4_0
+      # headroom, so KleidiAI lands ~1.00x there. Q8_0 is where its own kernels have room.
+      # This runs that rung ALONE (~3h, fits the 300-minute timeout) by skipping the Q4_0
+      # ladder, the noise floor and the secondary sweeps.
+      run_q8_only:
+        description: "Run ONLY the Q8_0 ladder (~3h) and skip the Q4_0 headline run"
+        default: false
+        type: boolean
   push:
     branches: [main]
     paths: ["src/**", "configs/**", ".github/workflows/arm-bench.yml"]
@@ -254,11 +262,13 @@ jobs:
           key: models-v2-${{ hashFiles('configs/models.yaml') }}-${{ github.run_id }}
 
       - name: "Noise floor: same build twice (ctrl-a vs ctrl-b) — the honesty yardstick"
+        if: ${{ github.event.inputs.run_q8_only != 'true' }}
         env:
           LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
         run: firstflight experiment --name noise-floor --no-report --no-quality
 
       - name: "Experiment: KleidiAI attribution ladder (generic → repack → KleidiAI) + quality"
+        if: ${{ github.event.inputs.run_q8_only != 'true' }}
         env:
           LLAMA_GENERIC_BIN: ${{ github.workspace }}/llama-generic/build
           LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build
@@ -276,11 +286,13 @@ jobs:
       # ttft + throughput run EARLY (right after the ladder): they are unique evidence with
       # no fallback, so an overtime cancel must lose the secondary sweeps below, not these.
       - name: "Measured TTFT: prompt-cache cold vs warm (llama-server --cache-reuse, Q4_0)"
+        if: ${{ github.event.inputs.run_q8_only != 'true' }}
         env:
           LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
         run: firstflight ttft --prefix-tokens 2048 --variant q4_0
 
       - name: "Concurrency: aggregate tok/s at 1/2/4/8 parallel requests (Q4_0)"
+        if: ${{ github.event.inputs.run_q8_only != 'true' }}
         env:
           LLAMA_CPP_BIN: ${{ github.workspace }}/llama-kleidiai/build
         run: firstflight throughput --prompt-tokens 1024 --levels 1,2,4,8 --variant q4_0
@@ -295,7 +307,7 @@ jobs:
       # The Q4_0 ladder understates KleidiAI: ggml's repack rung already owns most of the
       # Q4_0 headroom. Q8_0 is where KleidiAI's own kernels have room to show a clean delta.
       - name: "Experiment: the ladder again at Q8_0 (where KleidiAI's delta isn't pre-eaten)"
-        if: ${{ github.event.inputs.run_quant_sweep != 'false' }}
+        if: ${{ github.event.inputs.run_quant_sweep != 'false' || github.event.inputs.run_q8_only == 'true' }}
         env:
           LLAMA_GENERIC_BIN: ${{ github.workspace }}/llama-generic/build
           LLAMA_BASELINE_BIN: ${{ github.workspace }}/llama-baseline/build

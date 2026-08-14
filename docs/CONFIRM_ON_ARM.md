@@ -41,8 +41,8 @@ a different tag/date:
 4. ~~Repo URL~~ (done): `pyproject.toml` `[project.urls]` points at
    `amaan784/arm-firstflight-infer-lab`.
 
-5. **Replace the synthetic sample**: run the `arm-bench` workflow (the
-   `kleidiai-before-after` job) once and commit its real report over the demo sample.
+5. ~~**Replace the synthetic sample**~~: done. Run 31656321896 produced the committed report
+   in `bench/reports/` and the raw results in `bench/results/run-31656321896/`.
 
 6. **Pinning CPU mask**: `configs/experiments.yaml` `pinning` uses `cpu_mask: "0x0f"`
    (cores 0–3); set it for the core count of the box you pin on.

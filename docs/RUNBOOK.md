@@ -95,16 +95,33 @@ git checkout main                # back to the current project
 
 4. **The headline run:** GitHub → Actions → **arm-bench** → *Run workflow*.
    This dispatches **kleidiai-before-after**: builds llama.cpp three ways (generic armv8-a
-   floor / native+repack default / KleidiAI), runs the attribution ladder (3 interleaved
-   rounds) + noise-floor control + quality guardrail + perplexity + KleidiAI-active detection
-   + the quant sweep, and renders the report into the run summary. The standalone HTML
+   floor / native+repack default / KleidiAI), runs the attribution ladder (2 interleaved
+   rounds) + noise-floor control + perplexity + KleidiAI-active detection, and renders the
+   report into the run summary. Budget ~2h50m. Leave `run_quant_sweep` off unless you are on
+   a runner you control: it adds ~11h and will blow the 300-minute job timeout.
+
+   **Dispatch options:**
+
+   | inputs | what runs | time |
+   |---|---|---|
+   | defaults | Q4_0 ladder + noise floor + TTFT + concurrency | ~2h50m |
+   | `run_q8_only: true` | the Q8_0 ladder alone | ~3h |
+   | `run_quant_sweep: true` | everything | ~14h, **exceeds the timeout** |
+
+   `run_q8_only` exists because the Q4_0 ladder understates KleidiAI: ggml's repack already
+   owns most of the Q4_0 headroom, so KleidiAI measured 1.00x there. Q8_0 is the quant where
+   its own kernels have room to show a delta. It skips the Q4_0 headline steps so the Q8_0
+   rung fits inside the timeout on its own. The standalone HTML
    report + JSON results are attached as the `arm-headline-*` artifact.
    *(No write access to the repo? Fork it, enable workflows on the fork when GitHub asks,
    and dispatch there; `Run workflow` needs write permission.)*
 
-5. **Promote the real numbers:** download that artifact, copy its report + results over
-   `bench/reports/` / `bench/results/` (replacing the synthetic sample), update the README
-   headline with the real before/after figures, commit.
+5. **Promote the real numbers:** download that artifact, put its result JSONs in
+   `bench/results/run-<run-id>/`, render with
+   `firstflight report --results-dir bench/results/run-<run-id> --instance github-arm-runner`,
+   update the README headline, commit. Keeping a committed run in its own subdirectory means
+   the flat `*.json` loader cannot mix it into a later measurement. Done once already for
+   run 31656321896.
 
 ## D. Optional: remote Arm VM (bigger models, Performix)
 
@@ -158,8 +175,8 @@ its output alongside the results JSON to document the run's environment.
       there is no Arm-provided cloud environment or credits for this challenge.)
 
 **Project:**
-- [ ] Real Arm numbers in the README headline (from the CI artifact or the VM run)
-- [ ] Real report committed in `bench/reports/` (replacing the synthetic, banner-labeled sample)
+- [x] Real Arm numbers in the README headline (from the CI artifact or the VM run)
+- [x] Real report committed in `bench/reports/` (replacing the synthetic, banner-labeled sample)
 - [ ] `configs/instances.yaml` price confirmed for your actual instance/region
 - [ ] Repo URL in `pyproject.toml`; repo public; MIT license visible in the About sidebar
 - [ ] `arm-bench` workflow green and linked in the submission (judges can re-run it)

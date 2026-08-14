@@ -101,8 +101,10 @@ answering in about 42 seconds, with the same model on the same machine.
 
 Doubling the prompt length more than doubles that cost: attention compares every token with
 every earlier token, so the work grows with the square of the length. A single number at one
-context length therefore says very little, which is why the harness sweeps 128 → 32k and reports
-the curve.
+context length therefore says very little, which is why the harness sweeps a range of context
+lengths and reports the curve. The first real run showed exactly why that matters: the
+accelerated builds led by 3.60x at 1k and trailed by 10% at 8k, on the same hardware, in the
+same run.
 
 ### Why Arm / Neoverse
 **Neoverse** is Arm's server-CPU family: Graviton2 = Neoverse-N1, Graviton3 = V1,

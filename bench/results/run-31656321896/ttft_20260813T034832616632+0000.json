@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-08-13T03:48:32.616632+00:00",
+  "model": "qwen2.5-0.5b-instruct",
+  "variant": "q4_0",
+  "prefix_target_tokens": 2048,
+  "cache_reuse": 256,
+  "threads": null,
+  "cold": {
+    "prompt_n": 1572,
+    "prompt_ms": 8491.588,
+    "predicted_n": 16,
+    "predicted_ms": 190.118
+  },
+  "warm": {
+    "prompt_n": 10,
+    "prompt_ms": 53.674,
+    "predicted_n": 16,
+    "predicted_ms": 190.802
+  },
+  "kind": "measured-ttft-prompt-cache",
+  "notes": "prompt_ms is llama-server's own measured prompt-processing time; warm turn shares the prefix with the cold turn (cache_prompt=true)",
+  "extra": {}
+}

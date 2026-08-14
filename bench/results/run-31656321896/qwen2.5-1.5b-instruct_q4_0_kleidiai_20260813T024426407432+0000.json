@@ -1,0 +1,106 @@
+{
+  "label": "kleidiai",
+  "timestamp": "2026-08-13T02:44:26.407432+00:00",
+  "workload": "long-context",
+  "host": {
+    "platform": "Linux-aarch64",
+    "arch": "aarch64",
+    "cpu_count": 4,
+    "is_arm_linux": true,
+    "cpu_info": "CPU",
+    "kleidiai": true,
+    "thp": "madvise",
+    "system_info": "n_threads = 4 (n_threads_batch = 4) / 4 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | SVE = 1 | DOTPROD = 1 | SVE_CNT = 16 | OPENMP = 1 | KLEIDIAI = 1 | REPACK = 1 |",
+    "kernel_buffer": "CPU_KLEIDIAI 702.86 MiB",
+    "cpu_features": "fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 sve asimdfhm uscat ilrcpc flagm sb paca pacg dcpodp sve2 sveaes svebitperm svesha3 svesm4 flagm2 frint svei8mm svebf16 i8mm bf16",
+    "kernel_tier": "I8MM",
+    "repack": true
+  },
+  "engine": {
+    "name": "llama.cpp",
+    "build_number": 1,
+    "build_commit": "a410713",
+    "backends": "CPU",
+    "binary": "/home/runner/work/arm-firstflight-infer-lab/arm-firstflight-infer-lab/llama-kleidiai/build/bin/llama-bench"
+  },
+  "model": {
+    "id": "qwen2.5-1.5b-instruct",
+    "variant": "q4_0",
+    "filename": "/home/runner/work/arm-firstflight-infer-lab/arm-firstflight-infer-lab/models/qwen2.5-1.5b-instruct-q4_0.gguf",
+    "size_bytes": 1060276736,
+    "n_params": 1777088000
+  },
+  "threads": 4,
+  "repetitions": 1,
+  "n_gen": 32,
+  "peak_rss_bytes": 1440100352,
+  "points": [
+    {
+      "kind": "pp",
+      "n_prompt": 1024,
+      "n_gen": 0,
+      "throughput_tok_s": 95.322968,
+      "throughput_stddev": 0.0,
+      "ttft_s": 10.74242673602022,
+      "threads": 4,
+      "samples_ts": [
+        95.323
+      ]
+    },
+    {
+      "kind": "pp",
+      "n_prompt": 2048,
+      "n_gen": 0,
+      "throughput_tok_s": 62.372306,
+      "throughput_stddev": 0.0,
+      "ttft_s": 32.83508549451418,
+      "threads": 4,
+      "samples_ts": [
+        62.3723
+      ]
+    },
+    {
+      "kind": "pp",
+      "n_prompt": 4096,
+      "n_gen": 0,
+      "throughput_tok_s": 37.008312,
+      "throughput_stddev": 0.0,
+      "ttft_s": 110.677839075719,
+      "threads": 4,
+      "samples_ts": [
+        37.0083
+      ]
+    },
+    {
+      "kind": "pp",
+      "n_prompt": 8192,
+      "n_gen": 0,
+      "throughput_tok_s": 20.462044,
+      "throughput_stddev": 0.0,
+      "ttft_s": 400.3510108765283,
+      "threads": 4,
+      "samples_ts": [
+        20.462
+      ]
+    },
+    {
+      "kind": "tg",
+      "n_prompt": 0,
+      "n_gen": 32,
+      "throughput_tok_s": 35.149064,
+      "throughput_stddev": 0.0,
+      "ttft_s": null,
+      "threads": 4,
+      "samples_ts": [
+        35.1491
+      ]
+    }
+  ],
+  "quality": {
+    "ppl": 37.4181
+  },
+  "experiment": "kleidiai",
+  "schema_version": 1,
+  "tool": "firstflight",
+  "tool_version": "0.1.0"
+}
